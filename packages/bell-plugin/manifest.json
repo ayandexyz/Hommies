@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.ayan-de.agent-fold",
+  "name": "agent-fold",
+  "version": "0.0.0",
+  "author": "agent-fold contributors",
+  "license": "MIT",
+  "description": "Bell in the Omarchy bar that surfaces pending coding-agent questions and permissions.",
+  "kinds": ["bar-widget", "service"],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml",
+    "service": "Service.qml"
+  },
+  "barWidget": {
+    "displayName": "Agent Fold",
+    "category": "Notifications",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  },
+  "omarchy": {
+    "requires": ["node >=20.10"]
+  }
+}

@@ -1,0 +1,42 @@
+# Node / pnpm
+node_modules/
+.pnpm-store/
+dist/
+build/
+*.tsbuildinfo
+
+# Editor / OS
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Test / coverage
+coverage/
+.nyc_output/
+
+# Env
+.env
+.env.local
+.env.*.local
+
+# Build artifacts
+packages/*/dist/
+packages/*/build/
+
+# Bridge daemon runtime
+.bridge-data/
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+
+# Quickshell / QML caches
+.qmlcache/
+.qmllint/

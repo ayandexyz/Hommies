@@ -1,0 +1,44 @@
+{
+  "name": "@agent-fold/bridge",
+  "version": "0.0.0",
+  "description": "Localhost HTTP bridge that exposes pending coding-agent questions and permissions to the agent-fold Omarchy plugin.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./runtime": {
+      "types": "./dist/runtime.d.ts",
+      "import": "./dist/runtime.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20.10.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "echo 'no tests yet' && exit 0",
+    "lint": "echo 'lint not configured yet' && exit 0",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "dependencies": {
+    "effect": "^3.10.0"
+  },
+  "//": "TODO: add @t3tools/contracts and the extracted server-core package once they are publishable on npm. Until then, types.ts and server.ts use locally-declared structural types — see TODO in types.ts.",
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "typescript": "^5.6.3"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
