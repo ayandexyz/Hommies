@@ -19,13 +19,18 @@ export interface BridgeServerOptions {
 /**
  * One pending item in `GET /v1/pending`.
  *
- * `kind` discriminates between the two trackable event types in v1:
+ * `kind` discriminates between the trackable event types:
  * - `question`: a `user-input.requested` activity that has not been resolved
  * - `permission`: an `approval.requested` activity that has not been resolved
+ * - `attention`: the agent ended its turn with a plain-text question or
+ *   decision. Notify-only: it is answered in the agent's own terminal and can
+ *   be dismissed with any `decision` on `POST /v1/respond`.
+ * - `finished`: the agent ended its turn without asking anything. Status
+ *   only: excluded from `totalCount`, dismissed like `attention`.
  *
  * v2 will add `plan`, `session-error`, and `signed-out` to this union.
  */
-export type PendingItemKind = "question" | "permission";
+export type PendingItemKind = "question" | "permission" | "attention" | "finished";
 export type QuestionAnswerSurface = "topbar" | "cli";
 
 export interface PendingQuestionOption {
@@ -60,10 +65,15 @@ export interface PendingItem {
  * the QML panel can render one row per thread with the items underneath.
  */
 export interface PendingResponse {
+  /** Items that need the user; `finished` status items are not counted. */
   readonly totalCount: number;
   readonly threads: ReadonlyArray<{
     readonly threadId: ThreadId;
     readonly title: string;
+    /** Claude's `/resume` title for the session, when the transcript has one. */
+    readonly sessionTitle?: string;
+    /** Basename of the session's working directory. */
+    readonly project?: string;
     readonly items: ReadonlyArray<PendingItem>;
   }>;
 }
@@ -94,4 +104,19 @@ export interface ClaudePermissionHookInput {
   readonly tool_name: string;
   readonly tool_input: Record<string, unknown>;
   readonly permission_suggestions?: ReadonlyArray<unknown>;
+  /** Added by agent-fold's hook adapter from the session transcript. */
+  readonly session_title?: string;
+}
+
+/**
+ * Body posted by the Claude hook adapter for Stop, UserPromptSubmit, and
+ * SessionEnd. The adapter resolves `last_assistant_message` from the
+ * transcript when Claude Code does not supply it.
+ */
+export interface ClaudeTurnHookInput {
+  readonly session_id: string;
+  readonly cwd?: string;
+  readonly hook_event_name: "Stop" | "UserPromptSubmit" | "SessionEnd";
+  readonly last_assistant_message?: string;
+  readonly session_title?: string;
 }

@@ -23,7 +23,7 @@ The server binds to `127.0.0.1` only. Routes:
 | --- | --- | --- |
 | `GET` | `/v1/pending` | Pending questions + permissions across all threads, grouped by thread. |
 | `GET` | `/v1/stream` | SSE: emits deltas as the projection changes. |
-| `POST` | `/v1/respond` | Dispatch a user response to an open question or permission request. |
+| `POST` | `/v1/respond` | Dispatch a user response to an open question or permission request, or dismiss an `attention` item. |
 | `POST` | `/v1/preferences` | Select whether the top bar or Claude CLI owns question answers. |
 | `GET` | `/healthz` | Liveness probe. |
 
@@ -48,6 +48,9 @@ After installing `@agent-fold/bridge`, add this hook to `~/.claude/settings.json
     "PreToolUse": [{ "matcher": "AskUserQuestion", "hooks": [{ "type": "command", "command": "node /absolute/path/to/@agent-fold/bridge/dist/claude-hook.js" }] }],
     "PostToolUse": [{ "matcher": "AskUserQuestion", "hooks": [{ "type": "command", "command": "node /absolute/path/to/@agent-fold/bridge/dist/claude-hook.js" }] }],
     "PostToolUseFailure": [{ "matcher": "AskUserQuestion", "hooks": [{ "type": "command", "command": "node /absolute/path/to/@agent-fold/bridge/dist/claude-hook.js" }] }],
+    "Stop": [{ "hooks": [{ "type": "command", "command": "node /absolute/path/to/@agent-fold/bridge/dist/claude-hook.js", "timeout": 5 }] }],
+    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "node /absolute/path/to/@agent-fold/bridge/dist/claude-hook.js", "timeout": 5 }] }],
+    "SessionEnd": [{ "hooks": [{ "type": "command", "command": "node /absolute/path/to/@agent-fold/bridge/dist/claude-hook.js", "timeout": 5 }] }],
     "PermissionRequest": [
       {
         "hooks": [
@@ -73,6 +76,24 @@ Claude questions retain all headers, options, descriptions, and multi-select
 metadata. In top-bar mode the hook waits for `/v1/respond`; in CLI mode it
 returns immediately and keeps a read-only mirror until PostToolUse or
 PostToolUseFailure closes the item.
+
+### Plain-text questions (`Stop` hook)
+
+Claude sometimes ends its turn with a question in prose ("Should I commit
+this?") instead of calling `AskUserQuestion`. To Claude Code that looks the
+same as a finished turn, so the `Stop` hook reads the final assistant message
+(`last_assistant_message`, or the tail of `transcript_path`) and the bridge
+checks its closing paragraph. If it ends with `?` or asks for a decision
+("should I", "want me to", "which option", "let me know which", ...), an
+`attention` item appears in the bar. Anything else becomes a `finished` status
+item: the session is listed with a "Done" marker and the opening line of
+Claude's report, but it is not counted in `totalCount` or the bell badge.
+
+Both are notify-only: you reply in the terminal. They clear when you
+submit a prompt in that session (`UserPromptSubmit`), when the session ends
+(`SessionEnd`), when Claude starts another tool request in that session, when
+you press **Dismiss**, or after 12 hours. These hooks never write to stdout and
+never block Claude.
 
 ## Codex integration
 

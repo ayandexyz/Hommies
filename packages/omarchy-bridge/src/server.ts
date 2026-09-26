@@ -8,14 +8,18 @@ import type {
   BridgePreferencesInput,
   BridgeServerOptions,
   ClaudePermissionHookInput,
+  ClaudeTurnHookInput,
   PendingItem,
   PendingQuestionPrompt,
   PendingResponse,
   PendingResponseInput,
   QuestionAnswerSurface,
 } from "./types.js";
+import { detectReplyRequest, summarizeFinishedTurn } from "./stop-detection.js";
 
 const responseTimeoutMs = 5 * 60 * 1000;
+/** Turn-end items outlive hook timeouts, but not an abandoned session. */
+const attentionTimeoutMs = 12 * 60 * 60 * 1000;
 
 interface PendingPermission {
   readonly item: PendingItem;
@@ -31,6 +35,8 @@ interface BridgeState {
   readonly token: string;
   readonly pending: Map<string, PendingPermission>;
   readonly questions: Map<string, PendingQuestion>;
+  /** `attention` or `finished`, keyed by session id: only the latest turn end matters. */
+  readonly attention: Map<string, PendingAttention>;
   readonly streams: Set<ServerResponse>;
   questionAnswerSurface: QuestionAnswerSurface;
 }
@@ -40,6 +46,13 @@ interface PendingQuestion {
   readonly input: ClaudeQuestionHookInput;
   readonly answerSurface: QuestionAnswerSurface;
   readonly resolve?: (answers: Readonly<Record<string, unknown>> | null) => void;
+  readonly timer: ReturnType<typeof setTimeout>;
+}
+
+interface PendingAttention {
+  readonly item: PendingItem;
+  readonly cwd: string | undefined;
+  readonly sessionTitle: string | undefined;
   readonly timer: ReturnType<typeof setTimeout>;
 }
 
@@ -56,6 +69,7 @@ export async function startBridgeServer(
     token: randomBytes(32).toString("base64url"),
     pending: new Map(),
     questions: new Map(),
+    attention: new Map(),
     streams: new Set(),
     questionAnswerSurface: "topbar",
   };
@@ -82,8 +96,10 @@ export async function startBridgeServer(
         clearTimeout(question.timer);
         question.resolve?.(null);
       }
+      for (const attention of state.attention.values()) clearTimeout(attention.timer);
       state.pending.clear();
       state.questions.clear();
+      state.attention.clear();
       for (const stream of state.streams) stream.end();
       await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     },
@@ -118,14 +134,67 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     if (request.method === "POST" && url.pathname === "/v1/providers/claude/question/resolved") {
       return resolveClaudeQuestion(response, await readJson<ClaudeQuestionHookInput>(request), state);
     }
+    if (request.method === "POST" && url.pathname === "/v1/providers/claude/stop") {
+      return receiveClaudeStop(response, await readJson<ClaudeTurnHookInput>(request), state);
+    }
+    if (request.method === "POST" && url.pathname === "/v1/providers/claude/resume") {
+      return receiveClaudeResume(response, await readJson<ClaudeTurnHookInput>(request), state);
+    }
     return sendJson(response, 404, { error: "not found" });
   } catch (error: unknown) {
     return sendJson(response, 400, { error: error instanceof Error ? error.message : "bad request" });
   }
 }
 
+/**
+ * Claude ended a turn. A question or decision becomes a notify-only
+ * `attention` item; anything else becomes a `finished` status item.
+ */
+function receiveClaudeStop(response: ServerResponse, input: ClaudeTurnHookInput, state: BridgeState): void {
+  if (input.hook_event_name !== "Stop" || typeof input.session_id !== "string" || typeof input.last_assistant_message !== "string") {
+    throw new Error("invalid Claude Stop payload");
+  }
+  const question = detectReplyRequest(input.last_assistant_message);
+  const kind = question === null ? "finished" : "attention";
+  const summary = question ?? summarizeFinishedTurn(input.last_assistant_message);
+  clearAttention(state, input.session_id);
+  const id = ApprovalRequestId(randomUUID());
+  const timer = setTimeout(() => {
+    if (state.attention.get(input.session_id)?.item.id !== id) return;
+    state.attention.delete(input.session_id);
+    publish(state);
+  }, attentionTimeoutMs);
+  state.attention.set(input.session_id, {
+    item: { id, threadId: ThreadId(input.session_id), provider: "claude", kind, summary, createdAt: new Date().toISOString() },
+    cwd: typeof input.cwd === "string" ? input.cwd : undefined,
+    sessionTitle: typeof input.session_title === "string" && input.session_title.length > 0 ? input.session_title : undefined,
+    timer,
+  });
+  publish(state);
+  return sendJson(response, 200, { ok: true, attention: kind === "attention" });
+}
+
+/** The user replied or the session ended, so Claude is no longer waiting. */
+function receiveClaudeResume(response: ServerResponse, input: ClaudeTurnHookInput, state: BridgeState): void {
+  if ((input.hook_event_name !== "UserPromptSubmit" && input.hook_event_name !== "SessionEnd") || typeof input.session_id !== "string") {
+    throw new Error("invalid Claude resume payload");
+  }
+  if (clearAttention(state, input.session_id)) publish(state);
+  return sendJson(response, 200, { ok: true });
+}
+
+function clearAttention(state: BridgeState, sessionId: string): boolean {
+  const existing = state.attention.get(sessionId);
+  if (!existing) return false;
+  clearTimeout(existing.timer);
+  state.attention.delete(sessionId);
+  return true;
+}
+
 async function receiveClaudeQuestion(response: ServerResponse, input: ClaudeQuestionHookInput, state: BridgeState): Promise<void> {
   if (input.hook_event_name === "PreToolUse" && input.tool_name === "AskUserQuestion") {
+    // A new tool call means Claude is working again in this session.
+    clearAttention(state, input.session_id);
     const id = ApprovalRequestId(questionKey(input.session_id, input.tool_use_id));
     const questions = parseQuestions(input.tool_input);
     const item: PendingItem = {
@@ -212,6 +281,7 @@ function authorised(request: IncomingMessage, state: BridgeState): boolean {
 
 async function receivePermission(response: ServerResponse, input: ClaudePermissionHookInput, provider: "claude" | "codex", state: BridgeState): Promise<void> {
   if (!isClaudePermissionInput(input)) throw new Error("invalid Claude PermissionRequest payload");
+  if (provider === "claude") clearAttention(state, input.session_id);
   const id = ApprovalRequestId(randomUUID());
   const item: PendingItem = {
     id, threadId: ThreadId(input.session_id), provider, kind: "permission",
@@ -238,6 +308,13 @@ async function receivePermission(response: ServerResponse, input: ClaudePermissi
 
 function respond(response: ServerResponse, input: PendingResponseInput, state: BridgeState): void {
   if (!input || typeof input.requestId !== "string" || typeof input.threadId !== "string") throw new Error("threadId and requestId are required");
+  const attention = state.attention.get(input.threadId);
+  if (attention && attention.item.id === input.requestId) {
+    // Notify-only or status: any decision dismisses it; replies happen in the CLI.
+    clearAttention(state, input.threadId);
+    publish(state);
+    return sendJson(response, 200, { ok: true });
+  }
   const pending = state.pending.get(input.requestId);
   const question = state.questions.get(input.requestId);
   if (question && question.item.threadId === input.threadId) {
@@ -263,27 +340,37 @@ function respond(response: ServerResponse, input: PendingResponseInput, state: B
 }
 
 function snapshot(state: BridgeState): PendingResponse {
-  const threads = new Map<string, { threadId: ReturnType<typeof ThreadId>; title: string; items: PendingItem[] }>();
+  type Thread = PendingResponse["threads"][number] & { items: PendingItem[] };
+  const threads = new Map<string, Thread>();
+  const add = (item: PendingItem, label: string, cwd: string | undefined, sessionTitle: string | undefined): void => {
+    const project = cwd ? basename(cwd) || cwd : undefined;
+    const existing = threads.get(item.threadId);
+    const thread: Thread = existing ?? {
+      threadId: item.threadId, title: project ? `${label} — ${project}` : label,
+      ...(project ? { project } : {}), items: [],
+    };
+    thread.items.push(item);
+    // Later hooks carry the newer title; Claude refines it as the session grows.
+    threads.set(item.threadId, sessionTitle ? { ...thread, sessionTitle } : thread);
+  };
   for (const { item, hookInput, provider } of state.pending.values()) {
-    const label = provider === "codex" ? "Codex" : "Claude Code";
-    const thread = threads.get(item.threadId) ?? { threadId: item.threadId, title: `${label} — ${basename(hookInput.cwd) || hookInput.cwd}`, items: [] };
-    thread.items.push(item);
-    threads.set(item.threadId, thread);
+    add(item, provider === "codex" ? "Codex" : "Claude Code", hookInput.cwd, hookInput.session_title);
   }
-  for (const { item } of state.questions.values()) {
-    const thread = threads.get(item.threadId) ?? { threadId: item.threadId, title: "Claude Code", items: [] };
-    thread.items.push(item);
-    threads.set(item.threadId, thread);
-  }
-  return { totalCount: state.pending.size + state.questions.size, threads: [...threads.values()] };
+  for (const { item, input } of state.questions.values()) add(item, "Claude Code", input.cwd, input.session_title);
+  for (const { item, cwd, sessionTitle } of state.attention.values()) add(item, "Claude Code", cwd, sessionTitle);
+  let waiting = 0;
+  for (const { item } of state.attention.values()) if (item.kind === "attention") waiting++;
+  return { totalCount: state.pending.size + state.questions.size + waiting, threads: [...threads.values()] };
 }
 
 interface ClaudeQuestionHookInput {
   readonly session_id: string;
+  readonly cwd?: string;
   readonly hook_event_name: "PreToolUse" | "PostToolUse" | "PostToolUseFailure";
   readonly tool_name: string;
   readonly tool_use_id: string;
   readonly tool_input: Record<string, unknown>;
+  readonly session_title?: string;
 }
 
 function questionKey(sessionId: string, toolUseId: string): string { return `${sessionId}:${toolUseId}`; }
