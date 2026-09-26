@@ -116,9 +116,10 @@ export interface ClaudePermissionHookInput {
 }
 
 /**
- * Body posted by the Claude hook adapter for Stop, UserPromptSubmit, and
- * SessionEnd. The adapter resolves `last_assistant_message` from the
- * transcript when Claude Code does not supply it.
+ * Body posted by the Claude and Codex hook adapters for Stop,
+ * UserPromptSubmit, and SessionEnd. The adapter resolves
+ * `last_assistant_message` from the transcript when the agent does not
+ * supply it.
  */
 export interface ClaudeTurnHookInput {
   readonly session_id: string;

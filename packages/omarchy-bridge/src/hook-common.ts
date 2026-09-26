@@ -1,0 +1,82 @@
+/** Plumbing shared by the Claude and Codex command-hook adapters. */
+import { readFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import { join } from "node:path";
+
+export interface BridgeConnection { readonly port: number; readonly token: string; }
+
+/** Fields both agents send on Stop, UserPromptSubmit, and SessionEnd. */
+export interface TurnHookEvent {
+  readonly hook_event_name?: string;
+  readonly session_id?: string;
+  readonly cwd?: string;
+  readonly transcript_path?: string | null;
+  readonly stop_hook_active?: boolean;
+  readonly last_assistant_message?: string | null;
+}
+
+export function isTurnEvent(name: string | undefined): boolean {
+  return name === "Stop" || name === "UserPromptSubmit" || name === "SessionEnd";
+}
+
+/** The running bridge's port and token, or `null` when it is not running. */
+export async function readConnection(): Promise<BridgeConnection | null> {
+  const dataDir = process.env.AGENT_FOLD_DATA_DIR ?? join(process.env.XDG_DATA_HOME ?? join(homedir(), ".local", "share"), "agent-fold");
+  try {
+    const connection = JSON.parse(await readFile(join(dataDir, "port.json"), "utf8")) as BridgeConnection;
+    return Number.isInteger(connection.port) && typeof connection.token === "string" ? connection : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function readStdin(): Promise<string> {
+  let input = "";
+  for await (const chunk of process.stdin) input += String(chunk);
+  return input;
+}
+
+export function postToBridge(connection: BridgeConnection, path: string, body: string, timeoutMs: number): Promise<Response> {
+  return fetch(`http://127.0.0.1:${connection.port}${path}`, {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-agent-fold-token": connection.token },
+    body,
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+}
+
+export interface TurnSources {
+  /** Final assistant text when the hook payload does not carry it. */
+  readonly lastAssistantText: (event: TurnHookEvent) => Promise<string | null>;
+  readonly sessionTitle: (event: TurnHookEvent) => Promise<string | null>;
+}
+
+/**
+ * Stop, UserPromptSubmit, and SessionEnd are notify-only: they never wait on
+ * the user and never write to stdout, because UserPromptSubmit stdout would be
+ * injected into the agent's context.
+ */
+export async function reportTurn(
+  provider: "claude" | "codex",
+  event: TurnHookEvent,
+  connection: BridgeConnection,
+  sources: TurnSources,
+): Promise<void> {
+  // stop_hook_active means another Stop hook already kept the agent going.
+  if (event.hook_event_name === "Stop" && event.stop_hook_active === true) return;
+  let body: Record<string, unknown> = { hook_event_name: event.hook_event_name, session_id: event.session_id, cwd: event.cwd };
+  if (event.hook_event_name === "Stop") {
+    const message = typeof event.last_assistant_message === "string" && event.last_assistant_message.length > 0
+      ? event.last_assistant_message
+      : await sources.lastAssistantText(event);
+    if (message === null) return;
+    const sessionTitle = await sources.sessionTitle(event);
+    body = { ...body, last_assistant_message: message, ...(sessionTitle === null ? {} : { session_title: sessionTitle }) };
+  }
+  const path = `/v1/providers/${provider}/${event.hook_event_name === "Stop" ? "stop" : "resume"}`;
+  try {
+    await postToBridge(connection, path, JSON.stringify(body), 2_000);
+  } catch {
+    // Notifications are best-effort; never delay the agent's turn.
+  }
+}

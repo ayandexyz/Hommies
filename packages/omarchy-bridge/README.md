@@ -108,28 +108,31 @@ bridge with `--no-notify`. Library callers opt in by passing
 
 ## Codex integration
 
-Codex permission requests use the same local pending queue. Add this entry to
-`~/.codex/hooks.json`, preserving any existing hook groups:
+Codex gets the same features as Claude Code, through Codex's own hooks:
+permission requests from the bar, plain-text question and finished-turn
+detection (`Stop`), clearing on reply or session end (`UserPromptSubmit`,
+`SessionEnd`), session names from the `thread_name` in
+`$CODEX_HOME/session_index.jsonl`, and desktop notifications. Codex's
+structured `request_user_input` tool is only offered in Plan mode and is not
+mirrored; in Default mode Codex asks in plain text, which the `Stop` detection
+covers.
+
+Add these entries to `~/.codex/hooks.json`, preserving any existing hook
+groups:
 
 ```json
 {
   "hooks": {
     "PermissionRequest": [
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node /absolute/path/to/@agent-fold/bridge/dist/codex-hook.js",
-            "timeout": 305
-          }
-        ]
-      }
-    ]
+      { "matcher": "*", "hooks": [{ "type": "command", "command": "node /absolute/path/to/@agent-fold/bridge/dist/codex-hook.js", "timeout": 305 }] }
+    ],
+    "Stop": [{ "hooks": [{ "type": "command", "command": "node /absolute/path/to/@agent-fold/bridge/dist/codex-hook.js", "timeout": 5 }] }],
+    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "node /absolute/path/to/@agent-fold/bridge/dist/codex-hook.js", "timeout": 5 }] }],
+    "SessionEnd": [{ "hooks": [{ "type": "command", "command": "node /absolute/path/to/@agent-fold/bridge/dist/codex-hook.js", "timeout": 5 }] }]
   }
 }
 ```
 
-Review and trust the hook from Codex's `/hooks` screen before testing it. If
-the bridge is unavailable, the adapter exits without a decision and Codex
-keeps its native approval prompt.
+Review and trust the hooks from Codex's `/hooks` screen before testing them.
+If the bridge is unavailable, the adapter exits without a decision and Codex
+keeps its native approval prompt; turn hooks never write to stdout.

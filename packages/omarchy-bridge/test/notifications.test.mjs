@@ -55,8 +55,8 @@ process.stdout.write("42\\n");
 `);
     await chmod(stub, 0o755);
     const notify = createDesktopNotifier(stub);
+    // Back to back: the second call must still wait for the first id.
     notify({ key: "s1", title: "Claude · a", body: "Finished: <b>x</b> & y", urgency: "low" });
-    await waitForLines(log, 1);
     notify({ key: "s1", title: "Claude · a", body: "Question: $(rm -rf ~)", urgency: "normal" });
     const calls = await waitForLines(log, 2);
     assert.deepEqual(calls[0], [

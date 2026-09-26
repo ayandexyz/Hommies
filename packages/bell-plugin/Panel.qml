@@ -148,6 +148,10 @@ Panel {
 
   onSelectedProviderChanged: selectedThreadId = ""
 
+  function agentName(item) {
+    return item && item.provider === "codex" ? "Codex" : "Claude"
+  }
+
   function sessionProject(thread) {
     if (thread.project) return String(thread.project)
     // Bridges older than `project` only send "Claude Code — <folder>".
@@ -707,8 +711,8 @@ Panel {
                 Text {
                   visible: itemDelegate.itemData.kind === "attention" || itemDelegate.itemData.kind === "finished"
                   text: itemDelegate.itemData.kind === "finished"
-                    ? "Claude finished this turn"
-                    : "Claude is waiting for your reply in the terminal"
+                    ? root.agentName(itemDelegate.itemData) + " finished this turn"
+                    : root.agentName(itemDelegate.itemData) + " is waiting for your reply in the terminal"
                   color: root.barForeground
                   opacity: 0.65
                   font.family: root.bar ? root.bar.fontFamily : Style.font.family

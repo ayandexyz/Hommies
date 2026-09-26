@@ -52,6 +52,8 @@ interface PendingQuestion {
   readonly timer: ReturnType<typeof setTimeout>;
 }
 
+type Provider = "claude" | "codex";
+
 interface PendingAttention {
   readonly item: PendingItem;
   readonly cwd: string | undefined;
@@ -139,11 +141,11 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     if (request.method === "POST" && url.pathname === "/v1/providers/claude/question/resolved") {
       return resolveClaudeQuestion(response, await readJson<ClaudeQuestionHookInput>(request), state);
     }
-    if (request.method === "POST" && url.pathname === "/v1/providers/claude/stop") {
-      return receiveClaudeStop(response, await readJson<ClaudeTurnHookInput>(request), state);
-    }
-    if (request.method === "POST" && url.pathname === "/v1/providers/claude/resume") {
-      return receiveClaudeResume(response, await readJson<ClaudeTurnHookInput>(request), state);
+    const turn = /^\/v1\/providers\/(claude|codex)\/(stop|resume)$/.exec(url.pathname);
+    if (request.method === "POST" && turn) {
+      const provider = turn[1] as Provider;
+      const input = await readJson<ClaudeTurnHookInput>(request);
+      return turn[2] === "stop" ? receiveStop(response, input, provider, state) : receiveResume(response, input, state);
     }
     return sendJson(response, 404, { error: "not found" });
   } catch (error: unknown) {
@@ -152,12 +154,12 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
 }
 
 /**
- * Claude ended a turn. A question or decision becomes a notify-only
+ * An agent ended a turn. A question or decision becomes a notify-only
  * `attention` item; anything else becomes a `finished` status item.
  */
-function receiveClaudeStop(response: ServerResponse, input: ClaudeTurnHookInput, state: BridgeState): void {
+function receiveStop(response: ServerResponse, input: ClaudeTurnHookInput, provider: Provider, state: BridgeState): void {
   if (input.hook_event_name !== "Stop" || typeof input.session_id !== "string" || typeof input.last_assistant_message !== "string") {
-    throw new Error("invalid Claude Stop payload");
+    throw new Error("invalid Stop payload");
   }
   const question = detectReplyRequest(input.last_assistant_message);
   const kind = question === null ? "finished" : "attention";
@@ -170,7 +172,7 @@ function receiveClaudeStop(response: ServerResponse, input: ClaudeTurnHookInput,
     publish(state);
   }, attentionTimeoutMs);
   state.attention.set(input.session_id, {
-    item: { id, threadId: ThreadId(input.session_id), provider: "claude", kind, summary, createdAt: new Date().toISOString() },
+    item: { id, threadId: ThreadId(input.session_id), provider, kind, summary, createdAt: new Date().toISOString() },
     cwd: typeof input.cwd === "string" ? input.cwd : undefined,
     sessionTitle: typeof input.session_title === "string" && input.session_title.length > 0 ? input.session_title : undefined,
     timer,
@@ -180,10 +182,10 @@ function receiveClaudeStop(response: ServerResponse, input: ClaudeTurnHookInput,
   return sendJson(response, 200, { ok: true, attention: kind === "attention" });
 }
 
-/** The user replied or the session ended, so Claude is no longer waiting. */
-function receiveClaudeResume(response: ServerResponse, input: ClaudeTurnHookInput, state: BridgeState): void {
+/** The user replied or the session ended, so the agent is no longer waiting. */
+function receiveResume(response: ServerResponse, input: ClaudeTurnHookInput, state: BridgeState): void {
   if ((input.hook_event_name !== "UserPromptSubmit" && input.hook_event_name !== "SessionEnd") || typeof input.session_id !== "string") {
-    throw new Error("invalid Claude resume payload");
+    throw new Error("invalid resume payload");
   }
   if (clearAttention(state, input.session_id)) publish(state);
   return sendJson(response, 200, { ok: true });
@@ -323,7 +325,8 @@ function authorised(request: IncomingMessage, state: BridgeState): boolean {
 
 async function receivePermission(response: ServerResponse, input: ClaudePermissionHookInput, provider: "claude" | "codex", state: BridgeState): Promise<void> {
   if (!isClaudePermissionInput(input)) throw new Error("invalid Claude PermissionRequest payload");
-  if (provider === "claude") clearAttention(state, input.session_id);
+  // A new request means the agent is working again in this session.
+  clearAttention(state, input.session_id);
   const id = ApprovalRequestId(randomUUID());
   const item: PendingItem = {
     id, threadId: ThreadId(input.session_id), provider, kind: "permission",
@@ -400,7 +403,9 @@ function snapshot(state: BridgeState): PendingResponse {
     add(item, provider === "codex" ? "Codex" : "Claude Code", hookInput.cwd, hookInput.session_title);
   }
   for (const { item, input } of state.questions.values()) add(item, "Claude Code", input.cwd, input.session_title);
-  for (const { item, cwd, sessionTitle } of state.attention.values()) add(item, "Claude Code", cwd, sessionTitle);
+  for (const { item, cwd, sessionTitle } of state.attention.values()) {
+    add(item, item.provider === "codex" ? "Codex" : "Claude Code", cwd, sessionTitle);
+  }
   return { totalCount: state.pending.size + state.questions.size + state.attention.size, threads: [...threads.values()] };
 }
 

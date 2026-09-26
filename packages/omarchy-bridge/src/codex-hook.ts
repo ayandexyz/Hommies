@@ -1,33 +1,33 @@
-/** Command-hook adapter for Codex PermissionRequest events. */
-import { readFile } from "node:fs/promises";
-import { homedir } from "node:os";
-import { join } from "node:path";
-
-interface PortFile { readonly port: number; readonly token: string; }
+/** Command-hook adapter for Codex permission requests and turn ends. */
+import { isTurnEvent, postToBridge, readConnection, readStdin, reportTurn, type TurnHookEvent } from "./hook-common.js";
+import { lastCodexAssistantText, readCodexSessionTitle } from "./codex-transcript.js";
+import { readTranscriptTail } from "./transcript.js";
 
 async function main(): Promise<void> {
   const input = await readStdin();
-  const dataDir = process.env.AGENT_FOLD_DATA_DIR ?? join(process.env.XDG_DATA_HOME ?? join(homedir(), ".local", "share"), "agent-fold");
-  let connection: PortFile;
-  try { connection = JSON.parse(await readFile(join(dataDir, "port.json"), "utf8")) as PortFile; } catch { return; }
-  if (!Number.isInteger(connection.port) || typeof connection.token !== "string") return;
-  try {
-    const response = await fetch(`http://127.0.0.1:${connection.port}/v1/providers/codex/permission`, {
-      method: "POST",
-      headers: { "content-type": "application/json", "x-agent-fold-token": connection.token },
-      body: input,
-      signal: AbortSignal.timeout(5 * 60 * 1000 + 5_000),
+  let event: TurnHookEvent;
+  try { event = JSON.parse(input) as TurnHookEvent; } catch { return; }
+  const connection = await readConnection();
+  if (connection === null) return;
+  if (isTurnEvent(event.hook_event_name)) {
+    await reportTurn("codex", event, connection, {
+      lastAssistantText: async ({ transcript_path }) => {
+        const tail = await readTranscriptTail(transcript_path ?? undefined);
+        return tail === null ? null : lastCodexAssistantText(tail);
+      },
+      sessionTitle: ({ session_id }) => readCodexSessionTitle(session_id),
     });
+    return;
+  }
+  try {
+    // Label the session in the bar with the name Codex shows in `codex resume`.
+    const sessionTitle = await readCodexSessionTitle(event.session_id);
+    const body = sessionTitle === null ? input : JSON.stringify({ ...event, session_title: sessionTitle });
+    const response = await postToBridge(connection, "/v1/providers/codex/permission", body, 5 * 60 * 1000 + 5_000);
     if (response.ok) process.stdout.write(await response.text());
   } catch {
     // Keep the native approval prompt when the optional bridge is unavailable.
   }
-}
-
-async function readStdin(): Promise<string> {
-  let input = "";
-  for await (const chunk of process.stdin) input += String(chunk);
-  return input;
 }
 
 void main();
