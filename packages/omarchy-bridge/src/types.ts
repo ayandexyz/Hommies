@@ -1,4 +1,5 @@
 import type { ApprovalRequestId, ProviderDriverKind, ThreadId } from "./localContracts.js";
+import type { BridgeNotifier } from "./notifier.js";
 
 /**
  * Options for `startBridgeServer`.
@@ -14,6 +15,11 @@ export interface BridgeServerOptions {
   readonly dataDir: string;
   readonly port: number;
   readonly host?: string;
+  /**
+   * Called once for every new pending item while desktop notifications are
+   * enabled. `runtime.ts` passes a `notify-send` notifier; omit it to disable.
+   */
+  readonly notify?: BridgeNotifier;
 }
 
 /**
@@ -25,8 +31,8 @@ export interface BridgeServerOptions {
  * - `attention`: the agent ended its turn with a plain-text question or
  *   decision. Notify-only: it is answered in the agent's own terminal and can
  *   be dismissed with any `decision` on `POST /v1/respond`.
- * - `finished`: the agent ended its turn without asking anything. Status
- *   only: excluded from `totalCount`, dismissed like `attention`.
+ * - `finished`: the agent ended its turn without asking anything. Counted so
+ *   the bell notifies; dismissed like `attention`.
  *
  * v2 will add `plan`, `session-error`, and `signed-out` to this union.
  */
@@ -65,7 +71,6 @@ export interface PendingItem {
  * the QML panel can render one row per thread with the items underneath.
  */
 export interface PendingResponse {
-  /** Items that need the user; `finished` status items are not counted. */
   readonly totalCount: number;
   readonly threads: ReadonlyArray<{
     readonly threadId: ThreadId;
@@ -91,8 +96,10 @@ export interface PendingResponseInput {
   readonly answers?: Readonly<Record<string, unknown>>;
 }
 
+/** Either field may be sent alone; at least one is required. */
 export interface BridgePreferencesInput {
-  readonly questionAnswerSurface: QuestionAnswerSurface;
+  readonly questionAnswerSurface?: QuestionAnswerSurface;
+  readonly desktopNotifications?: boolean;
 }
 
 /** Payload sent by Claude Code's PermissionRequest hook. */

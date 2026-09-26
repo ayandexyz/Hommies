@@ -13,12 +13,14 @@
 import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
 
+import { createDesktopNotifier } from "./notifier.js";
 import { startBridgeServer } from "./server.js";
 
 interface RuntimeOptions {
   readonly dataDir: string;
   readonly port: number;
   readonly host: string;
+  readonly notify: boolean;
 }
 
 function parseArgs(argv: ReadonlyArray<string>): RuntimeOptions {
@@ -39,6 +41,7 @@ function parseArgs(argv: ReadonlyArray<string>): RuntimeOptions {
     dataDir: resolve(args.get("data-dir") ?? ".bridge-data"),
     port: Number(args.get("port") ?? "0"),
     host: args.get("host") ?? "127.0.0.1",
+    notify: args.get("no-notify") !== "true",
   };
 }
 
@@ -49,6 +52,7 @@ async function main(): Promise<void> {
     dataDir: options.dataDir,
     port: options.port,
     host: options.host,
+    ...(options.notify ? { notify: createDesktopNotifier() } : {}),
   });
   process.stdout.write(`agent-fold-bridge listening on ${options.host}:${server.port}\n`);
   const shutdown = async (): Promise<void> => {

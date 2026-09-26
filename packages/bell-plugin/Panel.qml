@@ -13,8 +13,8 @@ import "bridge.js" as Bridge
  * decides whether controls here are interactive or mirror the CLI prompt.
  * `attention` items are notify-only: Claude ended its turn with a plain-text
  * question, so the reply happens in the terminal and the bar can only dismiss.
- * `finished` items are status only: listed so every session that ended a turn
- * is visible, but never counted as pending.
+ * `finished` items mark a session whose turn ended without a question. They
+ * count toward the bell like other items but render as "Done".
  *
  * Each provider tab first lists its sessions (one row per thread); clicking a
  * row opens that session's items and the back row returns to the list.
@@ -178,19 +178,27 @@ Panel {
     ? hostWidget.questionAnswerSurface === "topbar"
     : String(setting("questionAnswerSurface", "Top bar")) !== "Claude CLI"
 
+  readonly property bool desktopNotifications: hostWidget
+    ? hostWidget.desktopNotifications
+    : setting("desktopNotifications", true) !== false
+
+  function toggleDesktopNotifications() {
+    if (!hostWidget || typeof hostWidget.setDesktopNotifications !== "function") return
+    hostWidget.setDesktopNotifications(!root.desktopNotifications)
+  }
+
   function toggleQuestionAnswerSurface() {
     if (!hostWidget || typeof hostWidget.setQuestionAnswerSurface !== "function") return
     hostWidget.setQuestionAnswerSurface(root.questionsAnsweredInTopbar ? "cli" : "topbar")
   }
 
-  // `finished` items are status only and never count as pending.
   function providerCount(provider) {
     var count = 0
     var threads = hostWidget && hostWidget.snapshot ? hostWidget.snapshot.threads : []
     for (var threadIndex = 0; threadIndex < threads.length; threadIndex++) {
       var items = threads[threadIndex].items || []
       for (var itemIndex = 0; itemIndex < items.length; itemIndex++) {
-        if (items[itemIndex].provider === provider && items[itemIndex].kind !== "finished") count++
+        if (items[itemIndex].provider === provider) count++
       }
     }
     return count
@@ -327,6 +335,25 @@ Panel {
               trackHeight: 22
               cursorPad: Style.space(2)
               onToggled: root.toggleQuestionAnswerSurface()
+            }
+
+            Text {
+              anchors.verticalCenter: parent.verticalCenter
+              leftPadding: Style.space(8)
+              text: "Notify"
+              color: root.barForeground
+              opacity: 0.72
+              font.family: root.bar ? root.bar.fontFamily : Style.font.family
+              font.pixelSize: Style.font.caption
+            }
+
+            ToggleSwitch {
+              anchors.verticalCenter: parent.verticalCenter
+              checked: root.desktopNotifications
+              foreground: root.barForeground
+              trackHeight: 22
+              cursorPad: Style.space(2)
+              onToggled: root.toggleDesktopNotifications()
             }
           }
         }

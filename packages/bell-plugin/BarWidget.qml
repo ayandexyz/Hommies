@@ -25,6 +25,7 @@ BarWidget {
   readonly property bool popoutSwitchClosing: panelLoader.item ? panelLoader.item.popoutSwitchClosing === true : false
   readonly property string questionAnswerSurface: String(setting("questionAnswerSurface", "Top bar")) === "Claude CLI"
     ? "cli" : "topbar"
+  readonly property bool desktopNotifications: setting("desktopNotifications", true) !== false
   property var snapshot: ({ totalCount: 0, threads: [] })
 
   function open() {
@@ -55,15 +56,23 @@ BarWidget {
   }
   function syncPreferences() {
     if (typeof Bridge === "undefined") return
-    Bridge.setPreferences({ questionAnswerSurface: root.questionAnswerSurface }).catch((error) => {
+    Bridge.setPreferences({
+      questionAnswerSurface: root.questionAnswerSurface,
+      desktopNotifications: root.desktopNotifications
+    }).catch((error) => {
       console.warn("agent-fold preference sync failed:", error)
     })
   }
   function setQuestionAnswerSurface(surface) {
-    var label = surface === "cli" ? "Claude CLI" : "Top bar"
+    updateSetting("questionAnswerSurface", surface === "cli" ? "Claude CLI" : "Top bar")
+  }
+  function setDesktopNotifications(enabled) {
+    updateSetting("desktopNotifications", enabled === true)
+  }
+  function updateSetting(name, value) {
     var entry = { id: root.moduleName }
     for (var key in root.settings) if (key !== "id") entry[key] = root.settings[key]
-    entry.questionAnswerSurface = label
+    entry[name] = value
 
     // Update the live widget first, then persist through Omarchy's supported
     // inline-settings API. The binding above synchronizes the bridge.
@@ -77,6 +86,7 @@ BarWidget {
 
   onBarChanged: injectPanel()
   onQuestionAnswerSurfaceChanged: syncPreferences()
+  onDesktopNotificationsChanged: syncPreferences()
 
   FileView {
     path: (Quickshell.env("XDG_DATA_HOME") || Quickshell.env("HOME") + "/.local/share") + "/agent-fold/port.json"

@@ -16,6 +16,7 @@ import type {
   QuestionAnswerSurface,
 } from "./types.js";
 import { detectReplyRequest, summarizeFinishedTurn } from "./stop-detection.js";
+import type { BridgeNotifier } from "./notifier.js";
 
 const responseTimeoutMs = 5 * 60 * 1000;
 /** Turn-end items outlive hook timeouts, but not an abandoned session. */
@@ -38,7 +39,9 @@ interface BridgeState {
   /** `attention` or `finished`, keyed by session id: only the latest turn end matters. */
   readonly attention: Map<string, PendingAttention>;
   readonly streams: Set<ServerResponse>;
+  readonly notify: BridgeNotifier | undefined;
   questionAnswerSurface: QuestionAnswerSurface;
+  desktopNotifications: boolean;
 }
 
 interface PendingQuestion {
@@ -71,7 +74,9 @@ export async function startBridgeServer(
     questions: new Map(),
     attention: new Map(),
     streams: new Set(),
+    notify: options.notify,
     questionAnswerSurface: "topbar",
+    desktopNotifications: true,
   };
   const server = createServer((request, response) => { void handleRequest(request, response, state); });
   await new Promise<void>((resolve, reject) => {
@@ -171,6 +176,7 @@ function receiveClaudeStop(response: ServerResponse, input: ClaudeTurnHookInput,
     timer,
   });
   publish(state);
+  announce(state, state.attention.get(input.session_id)?.item, input.cwd, input.session_title);
   return sendJson(response, 200, { ok: true, attention: kind === "attention" });
 }
 
@@ -209,6 +215,7 @@ async function receiveClaudeQuestion(response: ServerResponse, input: ClaudeQues
       previous.resolve?.(null);
       state.questions.delete(String(id));
     }
+    announce(state, item, input.cwd, input.session_title);
 
     if (state.questionAnswerSurface === "cli") {
       const timer = setTimeout(() => {
@@ -257,11 +264,46 @@ function resolveClaudeQuestion(response: ServerResponse, input: ClaudeQuestionHo
 }
 
 function updatePreferences(response: ServerResponse, input: BridgePreferencesInput, state: BridgeState): void {
-  if (input.questionAnswerSurface !== "topbar" && input.questionAnswerSurface !== "cli") {
+  const surface = input?.questionAnswerSurface;
+  const notifications = input?.desktopNotifications;
+  if (surface === undefined && notifications === undefined) {
+    return sendJson(response, 400, { error: "questionAnswerSurface or desktopNotifications is required" });
+  }
+  if (surface !== undefined && surface !== "topbar" && surface !== "cli") {
     return sendJson(response, 400, { error: "questionAnswerSurface must be topbar or cli" });
   }
-  state.questionAnswerSurface = input.questionAnswerSurface;
-  return sendJson(response, 200, { ok: true, questionAnswerSurface: state.questionAnswerSurface });
+  if (notifications !== undefined && typeof notifications !== "boolean") {
+    return sendJson(response, 400, { error: "desktopNotifications must be a boolean" });
+  }
+  if (surface !== undefined) state.questionAnswerSurface = surface;
+  if (notifications !== undefined) state.desktopNotifications = notifications;
+  return sendJson(response, 200, {
+    ok: true, questionAnswerSurface: state.questionAnswerSurface, desktopNotifications: state.desktopNotifications,
+  });
+}
+
+const notificationHeadings: Record<PendingItem["kind"], string> = {
+  permission: "Permission needed",
+  question: "Question",
+  attention: "Waiting for your reply",
+  finished: "Finished",
+};
+
+/** Sends one desktop notification per new item; a session's newer item replaces its older one. */
+function announce(state: BridgeState, item: PendingItem | undefined, cwd: string | undefined, sessionTitle: string | undefined): void {
+  if (!item || !state.notify || !state.desktopNotifications) return;
+  const agent = item.provider === "codex" ? "Codex" : "Claude";
+  const name = sessionTitle || (cwd ? basename(cwd) || cwd : undefined);
+  try {
+    state.notify({
+      key: item.threadId,
+      title: name ? `${agent} · ${name}` : agent,
+      body: `${notificationHeadings[item.kind]}: ${item.summary}`,
+      urgency: item.kind === "finished" ? "low" : item.kind === "permission" ? "critical" : "normal",
+    });
+  } catch {
+    // A broken notifier must not break the hook response.
+  }
 }
 
 /**
@@ -301,6 +343,7 @@ async function receivePermission(response: ServerResponse, input: ClaudePermissi
       resolve({ behavior: "unchanged" });
     });
     publish(state);
+    announce(state, item, input.cwd, input.session_title);
   });
   if (result.behavior === "unchanged") return sendJson(response, 200, {});
   return sendJson(response, 200, { hookSpecificOutput: { hookEventName: "PermissionRequest", decision: { behavior: result.behavior } } });
@@ -358,9 +401,7 @@ function snapshot(state: BridgeState): PendingResponse {
   }
   for (const { item, input } of state.questions.values()) add(item, "Claude Code", input.cwd, input.session_title);
   for (const { item, cwd, sessionTitle } of state.attention.values()) add(item, "Claude Code", cwd, sessionTitle);
-  let waiting = 0;
-  for (const { item } of state.attention.values()) if (item.kind === "attention") waiting++;
-  return { totalCount: state.pending.size + state.questions.size + waiting, threads: [...threads.values()] };
+  return { totalCount: state.pending.size + state.questions.size + state.attention.size, threads: [...threads.values()] };
 }
 
 interface ClaudeQuestionHookInput {

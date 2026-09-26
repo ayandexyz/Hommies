@@ -6,7 +6,10 @@
   "author": "agent-fold contributors",
   "license": "MIT",
   "description": "Bell in the Omarchy bar that surfaces pending coding-agent questions and permissions.",
-  "kinds": ["bar-widget", "service"],
+  "kinds": [
+    "bar-widget",
+    "service"
+  ],
   "entryPoints": {
     "barWidget": "BarWidget.qml",
     "service": "Service.qml"
@@ -18,7 +21,8 @@
     "allowMultiple": false,
     "defaultSection": "right",
     "defaults": {
-      "questionAnswerSurface": "Top bar"
+      "questionAnswerSurface": "Top bar",
+      "desktopNotifications": true
     },
     "schema": [
       {
@@ -26,12 +30,24 @@
         "type": "enum",
         "label": "Answer Claude questions in",
         "description": "Top bar pauses Claude until you answer here. Claude CLI mirrors the question in the bar while the native prompt owns the answer.",
-        "options": ["Top bar", "Claude CLI"],
+        "options": [
+          "Top bar",
+          "Claude CLI"
+        ],
         "defaultValue": "Top bar"
+      },
+      {
+        "key": "desktopNotifications",
+        "type": "boolean",
+        "label": "Desktop notifications",
+        "description": "Show a system notification for each new permission, question, waiting reply, or finished turn.",
+        "defaultValue": true
       }
     ]
   },
   "omarchy": {
-    "requires": ["node >=20.10"]
+    "requires": [
+      "node >=20.10"
+    ]
   }
 }

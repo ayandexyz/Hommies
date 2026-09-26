@@ -6,4 +6,6 @@
  */
 
 export { startBridgeServer } from "./server.js";
+export { createDesktopNotifier } from "./notifier.js";
+export type { BridgeNotification, BridgeNotifier } from "./notifier.js";
 export type { BridgeServerOptions, PendingItem, PendingResponse } from "./types.js";

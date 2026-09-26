@@ -24,7 +24,7 @@ The server binds to `127.0.0.1` only. Routes:
 | `GET` | `/v1/pending` | Pending questions + permissions across all threads, grouped by thread. |
 | `GET` | `/v1/stream` | SSE: emits deltas as the projection changes. |
 | `POST` | `/v1/respond` | Dispatch a user response to an open question or permission request, or dismiss an `attention` item. |
-| `POST` | `/v1/preferences` | Select whether the top bar or Claude CLI owns question answers. |
+| `POST` | `/v1/preferences` | Select whether the top bar or Claude CLI owns question answers, and toggle desktop notifications. |
 | `GET` | `/healthz` | Liveness probe. |
 
 The HTTP surface is the contract with the QML plugin; do not break it without a
@@ -87,13 +87,24 @@ checks its closing paragraph. If it ends with `?` or asks for a decision
 ("should I", "want me to", "which option", "let me know which", ...), an
 `attention` item appears in the bar. Anything else becomes a `finished` status
 item: the session is listed with a "Done" marker and the opening line of
-Claude's report, but it is not counted in `totalCount` or the bell badge.
+Claude's report, and it counts toward `totalCount` so the bell notifies you.
 
 Both are notify-only: you reply in the terminal. They clear when you
 submit a prompt in that session (`UserPromptSubmit`), when the session ends
 (`SessionEnd`), when Claude starts another tool request in that session, when
 you press **Dismiss**, or after 12 hours. These hooks never write to stdout and
 never block Claude.
+
+## Desktop notifications
+
+`agent-fold-bridge` sends a desktop notification (via `notify-send`) for every
+new item: permission requests (critical urgency), questions and waiting replies
+(normal), and finished turns (low). The title names the session by its Claude
+title or project folder, and a session's newer notification replaces its older
+one instead of stacking. Turn them off with the plugin's **Notify** toggle
+(`POST /v1/preferences` with `{"desktopNotifications": false}`), or start the
+bridge with `--no-notify`. Library callers opt in by passing
+`notify: createDesktopNotifier()` to `startBridgeServer`.
 
 ## Codex integration
 

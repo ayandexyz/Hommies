@@ -80,7 +80,7 @@ test("Stop with a question creates a dismissable attention item", async () => {
     const finished = await request("POST", "/v1/providers/claude/stop", { ...stop, last_assistant_message: "All done.\n\nDetails follow." });
     assert.deepEqual(await finished.json(), { ok: true, attention: false });
     const status = await pending(request);
-    assert.equal(status.totalCount, 0, "finished turns are listed but not counted");
+    assert.equal(status.totalCount, 1, "finished turns notify too");
     assert.equal(status.threads[0].items[0].kind, "finished");
     assert.equal(status.threads[0].items[0].summary, "All done.");
 
@@ -121,7 +121,7 @@ test("attention clears when the user replies, the session ends, or Claude resume
       hook_event_name: "Stop", session_id: "s3", cwd: "/tmp", last_assistant_message: "Finished the refactor.",
     });
     const replaced = await pending(request);
-    assert.equal(replaced.totalCount, 0, "a later finished turn replaces the question");
+    assert.equal(replaced.totalCount, 1, "a later finished turn replaces the question");
     assert.deepEqual(replaced.threads.map((thread) => thread.items.map((item) => item.kind)), [["finished"]]);
   });
 });
