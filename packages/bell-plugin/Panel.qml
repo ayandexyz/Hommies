@@ -11,6 +11,13 @@ import "bridge.js" as Bridge
  * grouped by thread. Claude questions retain their native headers, options,
  * descriptions, and multi-select behavior. The configured answer surface
  * decides whether controls here are interactive or mirror the CLI prompt.
+ * `attention` items are notify-only: Claude ended its turn with a plain-text
+ * question, so the reply happens in the terminal and the bar can only dismiss.
+ * `finished` items are status only: listed so every session that ended a turn
+ * is visible, but never counted as pending.
+ *
+ * Each provider tab first lists its sessions (one row per thread); clicking a
+ * row opens that session's items and the back row returns to the list.
  */
 Panel {
   id: root
@@ -54,9 +61,118 @@ Panel {
     }
   }
 
+  component SessionRow: Button {
+    id: sessionRow
+
+    // Not `required`: a required property on a Repeater delegate stops QML
+    // from injecting `modelData`, which the delegate binds this from.
+    property var threadData: ({ threadId: "", title: "", items: [] })
+
+    readonly property bool finished: root.threadFinished(threadData)
+
+    text: ""
+    leftAlign: true
+    bordered: true
+    opacity: finished ? 0.72 : 1
+    implicitHeight: sessionContent.implicitHeight + Style.spacing.controlPaddingY * 2
+
+    Column {
+      id: sessionContent
+      anchors.left: parent.left
+      anchors.right: parent.right
+      anchors.verticalCenter: parent.verticalCenter
+      anchors.leftMargin: sessionRow.horizontalPadding + Style.normalBorderWidth
+      anchors.rightMargin: sessionRow.horizontalPadding + Style.normalBorderWidth
+      spacing: Style.space(2)
+
+      Row {
+        width: parent.width
+        spacing: Style.space(6)
+
+        Text {
+          id: sessionTitle
+          width: parent.width - sessionCount.width - sessionChevron.width - parent.spacing * 2
+          text: root.sessionLabel(sessionRow.threadData)
+          textFormat: Text.PlainText
+          elide: Text.ElideRight
+          color: sessionRow.foreground
+          font.family: sessionRow.fontFamily
+          font.pixelSize: sessionRow.fontSize
+          font.bold: true
+        }
+        Text {
+          id: sessionCount
+          text: sessionRow.finished ? "Done" : String(root.pendingItemCount(sessionRow.threadData))
+          color: sessionRow.finished ? "#22c55e" : sessionRow.foreground
+          font.family: sessionRow.fontFamily
+          font.pixelSize: sessionRow.fontSize
+          font.bold: true
+        }
+        Text {
+          id: sessionChevron
+          text: "\u203a"
+          color: sessionRow.foreground
+          opacity: 0.72
+          font.family: sessionRow.fontFamily
+          font.pixelSize: sessionRow.fontSize
+        }
+      }
+
+      Text {
+        width: parent.width
+        text: root.sessionPreview(sessionRow.threadData)
+        textFormat: Text.PlainText
+        elide: Text.ElideRight
+        color: sessionRow.foreground
+        opacity: 0.65
+        font.family: sessionRow.fontFamily
+        font.pixelSize: Style.font.caption
+      }
+    }
+  }
+
   property var anchorItem: null
   property var hostWidget: null
   property string selectedProvider: "claude"
+  /** Empty shows the session list; otherwise the open session's thread id. */
+  property string selectedThreadId: ""
+
+  readonly property var currentThreads: providerThreads(selectedProvider)
+  // Falls back to the list when the open session has no pending items left.
+  readonly property var openThread: {
+    for (var index = 0; index < currentThreads.length; index++) {
+      if (currentThreads[index].threadId === selectedThreadId) return currentThreads[index]
+    }
+    return null
+  }
+
+  onSelectedProviderChanged: selectedThreadId = ""
+
+  function sessionProject(thread) {
+    if (thread.project) return String(thread.project)
+    // Bridges older than `project` only send "Claude Code — <folder>".
+    var title = String(thread.title || "")
+    var separator = title.indexOf(" \u2014 ")
+    return separator >= 0 ? title.slice(separator + 3) : title
+  }
+
+  // Claude's /resume title names the session; the folder is the fallback,
+  // with a short id so two untitled sessions in one folder stay distinct.
+  function sessionLabel(thread) {
+    if (thread.sessionTitle) return String(thread.sessionTitle)
+    return sessionProject(thread) + "  \u00b7  " + String(thread.threadId).slice(0, 8)
+  }
+
+  function sessionPreview(thread) {
+    var items = thread.items || []
+    var latest = items.length > 0 ? items[items.length - 1] : null
+    if (!latest) return ""
+    var prefix = latest.kind === "permission" ? "Permission: "
+      : latest.kind === "attention" ? "Waiting: "
+      : latest.kind === "finished" ? "Finished: " : "Question: "
+    var preview = prefix + String(latest.summary || "")
+    return thread.sessionTitle ? sessionProject(thread) + "  \u00b7  " + preview : preview
+  }
 
   readonly property bool questionsAnsweredInTopbar: hostWidget
     ? hostWidget.questionAnswerSurface === "topbar"
@@ -67,16 +183,30 @@ Panel {
     hostWidget.setQuestionAnswerSurface(root.questionsAnsweredInTopbar ? "cli" : "topbar")
   }
 
+  // `finished` items are status only and never count as pending.
   function providerCount(provider) {
     var count = 0
     var threads = hostWidget && hostWidget.snapshot ? hostWidget.snapshot.threads : []
     for (var threadIndex = 0; threadIndex < threads.length; threadIndex++) {
       var items = threads[threadIndex].items || []
       for (var itemIndex = 0; itemIndex < items.length; itemIndex++) {
-        if (items[itemIndex].provider === provider) count++
+        if (items[itemIndex].provider === provider && items[itemIndex].kind !== "finished") count++
       }
     }
     return count
+  }
+
+  function pendingItemCount(thread) {
+    var count = 0
+    var items = thread.items || []
+    for (var index = 0; index < items.length; index++) {
+      if (items[index].kind !== "finished") count++
+    }
+    return count
+  }
+
+  function threadFinished(thread) {
+    return (thread.items || []).length > 0 && pendingItemCount(thread) === 0
   }
 
   function providerThreads(provider) {
@@ -89,10 +219,19 @@ Panel {
         if (thread.items[itemIndex].provider === provider) items.push(thread.items[itemIndex])
       }
       if (items.length > 0) {
-        result.push({ threadId: thread.threadId, title: thread.title, items: items })
+        result.push({
+          threadId: thread.threadId,
+          title: thread.title,
+          sessionTitle: thread.sessionTitle,
+          project: thread.project,
+          items: items
+        })
       }
     }
-    return result
+    // Sessions that need you first; finished ones keep their relative order.
+    var waiting = result.filter(function(thread) { return !threadFinished(thread) })
+    var finished = result.filter(function(thread) { return threadFinished(thread) })
+    return waiting.concat(finished)
   }
 
   function desiredPanelWidth() {
@@ -209,7 +348,7 @@ Panel {
             foreground: root.barForeground
             fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
             fontSize: Style.font.body
-            onClicked: root.selectedProvider = "claude"
+            onClicked: { root.selectedProvider = "claude"; root.selectedThreadId = "" }
           }
 
           ProviderTab {
@@ -222,12 +361,12 @@ Panel {
             foreground: root.barForeground
             fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
             fontSize: Style.font.body
-            onClicked: root.selectedProvider = "codex"
+            onClicked: { root.selectedProvider = "codex"; root.selectedThreadId = "" }
           }
         }
 
         Text {
-          visible: root.providerCount(root.selectedProvider) === 0
+          visible: root.currentThreads.length === 0
           width: parent.width
           topPadding: Style.space(12)
           bottomPadding: Style.space(12)
@@ -240,19 +379,33 @@ Panel {
         }
 
         Repeater {
-          model: root.providerThreads(root.selectedProvider)
+          model: root.openThread ? [] : root.currentThreads
+          delegate: SessionRow {
+            width: parent.width
+            threadData: modelData
+            foreground: root.barForeground
+            fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+            fontSize: Style.font.body
+            onClicked: root.selectedThreadId = modelData.threadId
+          }
+        }
+
+        Repeater {
+          model: root.openThread ? [root.openThread] : []
           delegate: Column {
             id: threadColumn
             property var threadData: modelData
             width: parent.width
             spacing: Style.space(4)
-            Text {
+            Button {
               width: parent.width
-              text: modelData.title
-              color: root.barForeground
-              font.family: root.bar ? root.bar.fontFamily : Style.font.family
-              font.pixelSize: Style.font.body
-              font.bold: true
+              text: "\u2039  " + root.sessionLabel(modelData)
+              leftAlign: true
+              bordered: true
+              foreground: root.barForeground
+              fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+              fontSize: Style.font.body
+              onClicked: root.selectedThreadId = ""
             }
             Repeater {
               model: modelData.items
@@ -334,7 +487,8 @@ Panel {
                 }
 
                 // "cancel" releases the hook without a decision, so the
-                // provider falls back to its native terminal prompt.
+                // provider falls back to its native terminal prompt. For
+                // attention items any decision simply dismisses them.
                 function respondPermission(decision) {
                   Bridge.respond({
                     threadId: threadColumn.threadData.threadId,
@@ -360,14 +514,17 @@ Panel {
                   width: parent.width
                   spacing: Style.space(8)
                   Text {
-                    text: itemDelegate.itemData.kind === "question" ? "?" : "!"
-                    color: itemDelegate.itemData.kind === "question" ? "#f59e0b" : "#ef4444"
+                    text: itemDelegate.itemData.kind === "attention" ? "\u21a9"
+                      : itemDelegate.itemData.kind === "finished" ? "\u2713" : "!"
+                    color: itemDelegate.itemData.kind === "attention" ? "#3b82f6"
+                      : itemDelegate.itemData.kind === "finished" ? "#22c55e" : "#ef4444"
                     font.family: root.bar ? root.bar.fontFamily : Style.font.family
                     font.pixelSize: Style.font.body
                     font.bold: true
                   }
                   Text {
                     text: itemDelegate.itemData.summary
+                    textFormat: Text.PlainText
                     color: root.barForeground
                     font.family: root.bar ? root.bar.fontFamily : Style.font.family
                     font.pixelSize: Style.font.body
@@ -485,6 +642,7 @@ Panel {
                     && itemDelegate.questions.length === 0
                   width: parent.width
                   text: itemDelegate.itemData.summary || "Claude needs your input"
+                  textFormat: Text.PlainText
                   color: root.barForeground
                   font.family: root.bar ? root.bar.fontFamily : Style.font.family
                   font.pixelSize: Style.font.body
@@ -517,6 +675,28 @@ Panel {
                   fontSize: Style.font.body
                   opacity: itemDelegate.readyToSubmit() ? 1 : 0.5
                   onClicked: itemDelegate.submitAnswers()
+                }
+
+                Text {
+                  visible: itemDelegate.itemData.kind === "attention" || itemDelegate.itemData.kind === "finished"
+                  text: itemDelegate.itemData.kind === "finished"
+                    ? "Claude finished this turn"
+                    : "Claude is waiting for your reply in the terminal"
+                  color: root.barForeground
+                  opacity: 0.65
+                  font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                  font.pixelSize: Style.font.caption
+                }
+
+                Button {
+                  visible: itemDelegate.itemData.kind === "attention" || itemDelegate.itemData.kind === "finished"
+                  width: parent.width
+                  text: "Dismiss"
+                  bordered: true
+                  foreground: root.barForeground
+                  fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+                  fontSize: Style.font.bodySmall
+                  onClicked: itemDelegate.respondPermission("cancel")
                 }
 
                 Row {
