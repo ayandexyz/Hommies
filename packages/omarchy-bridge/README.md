@@ -24,6 +24,7 @@ The server binds to `127.0.0.1` only. Routes:
 | `GET` | `/v1/pending` | Pending questions + permissions across all threads, grouped by thread. |
 | `GET` | `/v1/stream` | SSE: emits deltas as the projection changes. |
 | `POST` | `/v1/respond` | Dispatch a user response to an open question or permission request. |
+| `POST` | `/v1/preferences` | Select whether the top bar or Claude CLI owns question answers. |
 | `GET` | `/healthz` | Liveness probe. |
 
 The HTTP surface is the contract with the QML plugin; do not break it without a
@@ -46,13 +47,14 @@ After installing `@agent-fold/bridge`, add this hook to `~/.claude/settings.json
   "hooks": {
     "PreToolUse": [{ "matcher": "AskUserQuestion", "hooks": [{ "type": "command", "command": "node /absolute/path/to/@agent-fold/bridge/dist/claude-hook.js" }] }],
     "PostToolUse": [{ "matcher": "AskUserQuestion", "hooks": [{ "type": "command", "command": "node /absolute/path/to/@agent-fold/bridge/dist/claude-hook.js" }] }],
+    "PostToolUseFailure": [{ "matcher": "AskUserQuestion", "hooks": [{ "type": "command", "command": "node /absolute/path/to/@agent-fold/bridge/dist/claude-hook.js" }] }],
     "PermissionRequest": [
       {
         "hooks": [
           {
             "type": "command",
             "command": "node /absolute/path/to/@agent-fold/bridge/dist/claude-hook.js",
-            "timeout": 305000
+            "timeout": 305
           }
         ]
       }
@@ -67,9 +69,10 @@ The hook reads that file; no network request leaves the machine. Claude's hook
 payload and pending permissions stay in memory and are discarded when the
 bridge exits.
 
-This initial integration is deliberately limited to permission decisions.
-Claude's ordinary interactive questions still belong to its terminal session;
-the API will surface them only once a safe response/resume mechanism exists.
+Claude questions retain all headers, options, descriptions, and multi-select
+metadata. In top-bar mode the hook waits for `/v1/respond`; in CLI mode it
+returns immediately and keeps a read-only mirror until PostToolUse or
+PostToolUseFailure closes the item.
 
 ## Codex integration
 
