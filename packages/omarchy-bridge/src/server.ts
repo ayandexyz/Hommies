@@ -4,7 +4,16 @@ import { basename, join } from "node:path";
 import { randomBytes, randomUUID } from "node:crypto";
 
 import { ApprovalRequestId, ThreadId } from "./localContracts.js";
-import type { BridgeServerOptions, ClaudePermissionHookInput, PendingItem, PendingResponse, PendingResponseInput } from "./types.js";
+import type {
+  BridgePreferencesInput,
+  BridgeServerOptions,
+  ClaudePermissionHookInput,
+  PendingItem,
+  PendingQuestionPrompt,
+  PendingResponse,
+  PendingResponseInput,
+  QuestionAnswerSurface,
+} from "./types.js";
 
 const responseTimeoutMs = 5 * 60 * 1000;
 
@@ -23,12 +32,14 @@ interface BridgeState {
   readonly pending: Map<string, PendingPermission>;
   readonly questions: Map<string, PendingQuestion>;
   readonly streams: Set<ServerResponse>;
+  questionAnswerSurface: QuestionAnswerSurface;
 }
 
 interface PendingQuestion {
   readonly item: PendingItem;
   readonly input: ClaudeQuestionHookInput;
-  readonly resolve: (answers: Readonly<Record<string, unknown>> | null) => void;
+  readonly answerSurface: QuestionAnswerSurface;
+  readonly resolve?: (answers: Readonly<Record<string, unknown>> | null) => void;
   readonly timer: ReturnType<typeof setTimeout>;
 }
 
@@ -41,7 +52,13 @@ export async function startBridgeServer(
     throw new Error("agent-fold bridge may only bind to loopback addresses");
   }
   await mkdir(options.dataDir, { recursive: true });
-  const state: BridgeState = { token: randomBytes(32).toString("base64url"), pending: new Map(), questions: new Map(), streams: new Set() };
+  const state: BridgeState = {
+    token: randomBytes(32).toString("base64url"),
+    pending: new Map(),
+    questions: new Map(),
+    streams: new Set(),
+    questionAnswerSurface: "topbar",
+  };
   const server = createServer((request, response) => { void handleRequest(request, response, state); });
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
@@ -61,7 +78,10 @@ export async function startBridgeServer(
         clearTimeout(pending.timer);
         pending.resolve({ behavior: "unchanged" });
       }
-      for (const question of state.questions.values()) { clearTimeout(question.timer); question.resolve(null); }
+      for (const question of state.questions.values()) {
+        clearTimeout(question.timer);
+        question.resolve?.(null);
+      }
       state.pending.clear();
       state.questions.clear();
       for (const stream of state.streams) stream.end();
@@ -83,6 +103,9 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     if (request.method === "GET" && url.pathname === "/v1/pending") return sendJson(response, 200, snapshot(state));
     if (request.method === "GET" && url.pathname === "/v1/stream") return openStream(response, state);
     if (request.method === "POST" && url.pathname === "/v1/respond") return respond(response, await readJson<PendingResponseInput>(request), state);
+    if (request.method === "POST" && url.pathname === "/v1/preferences") {
+      return updatePreferences(response, await readJson<BridgePreferencesInput>(request), state);
+    }
     if (request.method === "POST" && url.pathname === "/v1/providers/claude/permission") {
       return await receivePermission(response, await readJson<ClaudePermissionHookInput>(request), "claude", state);
     }
@@ -91,6 +114,9 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     }
     if (request.method === "POST" && url.pathname === "/v1/providers/claude/question") {
       return await receiveClaudeQuestion(response, await readJson<ClaudeQuestionHookInput>(request), state);
+    }
+    if (request.method === "POST" && url.pathname === "/v1/providers/claude/question/resolved") {
+      return resolveClaudeQuestion(response, await readJson<ClaudeQuestionHookInput>(request), state);
     }
     return sendJson(response, 404, { error: "not found" });
   } catch (error: unknown) {
@@ -101,18 +127,64 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
 async function receiveClaudeQuestion(response: ServerResponse, input: ClaudeQuestionHookInput, state: BridgeState): Promise<void> {
   if (input.hook_event_name === "PreToolUse" && input.tool_name === "AskUserQuestion") {
     const id = ApprovalRequestId(questionKey(input.session_id, input.tool_use_id));
+    const questions = parseQuestions(input.tool_input);
     const item: PendingItem = {
       id, threadId: ThreadId(input.session_id), provider: "claude", kind: "question",
-      summary: describeQuestion(input.tool_input), createdAt: new Date().toISOString(),
+      summary: questions[0]?.question ?? "Claude needs your input",
+      createdAt: new Date().toISOString(), questions,
+      answerSurface: state.questionAnswerSurface,
     };
+    const previous = state.questions.get(String(id));
+    if (previous) {
+      clearTimeout(previous.timer);
+      previous.resolve?.(null);
+      state.questions.delete(String(id));
+    }
+
+    if (state.questionAnswerSurface === "cli") {
+      const timer = setTimeout(() => {
+        state.questions.delete(String(id));
+        publish(state);
+      }, responseTimeoutMs);
+      state.questions.set(String(id), { item, input, answerSurface: "cli", timer });
+      publish(state);
+      // No hook decision: Claude continues into its native AskUserQuestion UI.
+      return sendJson(response, 200, {});
+    }
+
     const answers = await new Promise<Readonly<Record<string, unknown>> | null>((resolve) => {
       const timer = setTimeout(() => { state.questions.delete(String(id)); publish(state); resolve(null); }, responseTimeoutMs);
-      state.questions.set(String(id), { item, input, resolve, timer });
+      state.questions.set(String(id), { item, input, answerSurface: "topbar", resolve, timer });
       publish(state);
     });
     if (answers === null) return sendJson(response, 200, {});
     return sendJson(response, 200, { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "allow", updatedInput: { ...input.tool_input, answers } } });
   } else throw new Error("invalid Claude question hook payload");
+}
+
+function resolveClaudeQuestion(response: ServerResponse, input: ClaudeQuestionHookInput, state: BridgeState): void {
+  if (
+    (input.hook_event_name !== "PostToolUse" && input.hook_event_name !== "PostToolUseFailure") ||
+    input.tool_name !== "AskUserQuestion"
+  ) {
+    throw new Error("invalid Claude question resolution payload");
+  }
+  const id = questionKey(input.session_id, input.tool_use_id);
+  const pending = state.questions.get(id);
+  if (pending) {
+    clearTimeout(pending.timer);
+    state.questions.delete(id);
+    publish(state);
+  }
+  return sendJson(response, 200, { ok: true });
+}
+
+function updatePreferences(response: ServerResponse, input: BridgePreferencesInput, state: BridgeState): void {
+  if (input.questionAnswerSurface !== "topbar" && input.questionAnswerSurface !== "cli") {
+    return sendJson(response, 400, { error: "questionAnswerSurface must be topbar or cli" });
+  }
+  state.questionAnswerSurface = input.questionAnswerSurface;
+  return sendJson(response, 200, { ok: true, questionAnswerSurface: state.questionAnswerSurface });
 }
 
 function authorised(request: IncomingMessage, state: BridgeState): boolean {
@@ -144,12 +216,14 @@ function respond(response: ServerResponse, input: PendingResponseInput, state: B
   const pending = state.pending.get(input.requestId);
   const question = state.questions.get(input.requestId);
   if (question && question.item.threadId === input.threadId) {
+    if (question.answerSurface !== "topbar" || !question.resolve) {
+      return sendJson(response, 409, { error: "this question must be answered in Claude CLI" });
+    }
     if (!input.answers || typeof input.answers !== "object") return sendJson(response, 400, { error: "a question answer is required" });
-    const prompt = describeQuestion(question.input.tool_input);
-    const answer = input.answers._answer;
-    if (typeof answer !== "string" || answer.trim().length === 0) return sendJson(response, 400, { error: "answer must be a non-empty string" });
+    const answers = normalizeAnswers(question.item.questions ?? [], input.answers);
+    if (answers === null) return sendJson(response, 400, { error: "every question requires a non-empty answer" });
     state.questions.delete(input.requestId); clearTimeout(question.timer);
-    question.resolve({ [prompt]: answer }); publish(state);
+    question.resolve(answers); publish(state);
     return sendJson(response, 200, { ok: true });
   }
   if (!pending || pending.item.threadId !== input.threadId) return sendJson(response, 404, { error: "pending request not found" });
@@ -181,7 +255,7 @@ function snapshot(state: BridgeState): PendingResponse {
 
 interface ClaudeQuestionHookInput {
   readonly session_id: string;
-  readonly hook_event_name: "PreToolUse" | "PostToolUse";
+  readonly hook_event_name: "PreToolUse" | "PostToolUse" | "PostToolUseFailure";
   readonly tool_name: string;
   readonly tool_use_id: string;
   readonly tool_input: Record<string, unknown>;
@@ -189,13 +263,54 @@ interface ClaudeQuestionHookInput {
 
 function questionKey(sessionId: string, toolUseId: string): string { return `${sessionId}:${toolUseId}`; }
 
-function describeQuestion(toolInput: Record<string, unknown>): string {
+function parseQuestions(toolInput: Record<string, unknown>): PendingQuestionPrompt[] {
   const questions = toolInput.questions;
-  if (Array.isArray(questions) && questions[0] !== null && typeof questions[0] === "object") {
-    const question = (questions[0] as Record<string, unknown>).question;
-    if (typeof question === "string") return question.length > 320 ? `${question.slice(0, 317)}...` : question;
+  if (!Array.isArray(questions)) return [];
+  return questions.flatMap((rawQuestion, index): PendingQuestionPrompt[] => {
+    if (rawQuestion === null || typeof rawQuestion !== "object") return [];
+    const value = rawQuestion as Record<string, unknown>;
+    const question = typeof value.question === "string" && value.question.length > 0
+      ? value.question
+      : `Question ${index + 1}`;
+    const rawOptions = Array.isArray(value.options) ? value.options : [];
+    const options = rawOptions.flatMap((rawOption) => {
+      if (rawOption === null || typeof rawOption !== "object") return [];
+      const option = rawOption as Record<string, unknown>;
+      if (typeof option.label !== "string" || option.label.length === 0) return [];
+      return [{
+        label: option.label,
+        ...(typeof option.description === "string" && option.description.length > 0
+          ? { description: option.description }
+          : {}),
+      }];
+    });
+    return [{
+      id: question,
+      header: typeof value.header === "string" && value.header.length > 0
+        ? value.header
+        : `Question ${index + 1}`,
+      question,
+      options,
+      multiSelect: value.multiSelect === true,
+    }];
+  });
+}
+
+function normalizeAnswers(
+  questions: ReadonlyArray<PendingQuestionPrompt>,
+  input: Readonly<Record<string, unknown>>,
+): Readonly<Record<string, unknown>> | null {
+  // Keep the original one-field HTTP contract working for installed clients.
+  if (questions.length === 1 && typeof input._answer === "string" && input._answer.trim().length > 0) {
+    return { [questions[0]?.id ?? "Question 1"]: input._answer.trim() };
   }
-  return "Claude needs your input";
+  const answers: Record<string, string> = {};
+  for (const question of questions) {
+    const value = input[question.id];
+    if (typeof value !== "string" || value.trim().length === 0) return null;
+    answers[question.id] = value.trim();
+  }
+  return Object.keys(answers).length > 0 ? answers : null;
 }
 
 function publish(state: BridgeState): void {

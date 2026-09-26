@@ -26,6 +26,21 @@ export interface BridgeServerOptions {
  * v2 will add `plan`, `session-error`, and `signed-out` to this union.
  */
 export type PendingItemKind = "question" | "permission";
+export type QuestionAnswerSurface = "topbar" | "cli";
+
+export interface PendingQuestionOption {
+  readonly label: string;
+  readonly description?: string;
+}
+
+export interface PendingQuestionPrompt {
+  /** Claude Code expects answers to be keyed by the full question text. */
+  readonly id: string;
+  readonly header: string;
+  readonly question: string;
+  readonly options: ReadonlyArray<PendingQuestionOption>;
+  readonly multiSelect: boolean;
+}
 
 export interface PendingItem {
   readonly id: ApprovalRequestId;
@@ -34,6 +49,10 @@ export interface PendingItem {
   readonly kind: PendingItemKind;
   readonly summary: string;
   readonly createdAt: string;
+  /** Present for Claude AskUserQuestion items. Optional for HTTP compatibility. */
+  readonly questions?: ReadonlyArray<PendingQuestionPrompt>;
+  /** The surface that owns the response; the other surface is display-only. */
+  readonly answerSurface?: QuestionAnswerSurface;
 }
 
 /**
@@ -60,6 +79,10 @@ export interface PendingResponseInput {
   readonly requestId: ApprovalRequestId;
   readonly decision?: "accept" | "decline" | "cancel";
   readonly answers?: Readonly<Record<string, unknown>>;
+}
+
+export interface BridgePreferencesInput {
+  readonly questionAnswerSurface: QuestionAnswerSurface;
 }
 
 /** Payload sent by Claude Code's PermissionRequest hook. */

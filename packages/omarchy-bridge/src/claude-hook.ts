@@ -1,4 +1,4 @@
-/** Command-hook adapter for Claude Code's PermissionRequest event. */
+/** Command-hook adapter for Claude Code questions and permission requests. */
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -14,8 +14,15 @@ async function main(): Promise<void> {
   try { port = JSON.parse(await readFile(join(dataDir, "port.json"), "utf8")) as PortFile; } catch { return; }
   if (!Number.isInteger(port.port) || typeof port.token !== "string") return;
   try {
-    const question = event.tool_name === "AskUserQuestion" && event.hook_event_name === "PreToolUse";
-    const response = await fetch(`http://127.0.0.1:${port.port}/v1/providers/claude/${question ? "question" : "permission"}`, {
+    const question = event.tool_name === "AskUserQuestion";
+    const resolvingQuestion = question &&
+      (event.hook_event_name === "PostToolUse" || event.hook_event_name === "PostToolUseFailure");
+    const path = resolvingQuestion
+      ? "/v1/providers/claude/question/resolved"
+      : question
+        ? "/v1/providers/claude/question"
+        : "/v1/providers/claude/permission";
+    const response = await fetch(`http://127.0.0.1:${port.port}${path}`, {
       method: "POST", headers: { "content-type": "application/json", "x-agent-fold-token": port.token }, body: input,
       signal: AbortSignal.timeout(5 * 60 * 1000 + 5_000),
     });
