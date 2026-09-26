@@ -23,7 +23,7 @@ BarWidget {
 
   readonly property bool opened: panelLoader.item ? panelLoader.item.opened === true : false
   readonly property bool popoutSwitchClosing: panelLoader.item ? panelLoader.item.popoutSwitchClosing === true : false
-  readonly property var snapshot: ({ totalCount: 0, threads: [] })
+  property var snapshot: ({ totalCount: 0, threads: [] })
 
   function open() {
     if (panelLoader.item) panelLoader.item.open()
@@ -45,7 +45,9 @@ BarWidget {
   }
   function refreshSnapshot() {
     if (typeof Bridge !== "undefined") {
-      Bridge.snapshot().then((s) => { root.snapshot = s }).catch(() => {})
+      Bridge.snapshot().then((s) => { root.snapshot = s }).catch((error) => {
+        console.warn("agent-fold snapshot failed:", error)
+      })
     }
   }
 
@@ -60,7 +62,9 @@ BarWidget {
     printErrors: false
     onFileChanged: reload()
     onLoaded: {
-      try { Bridge.configure(JSON.parse(text())); root.refreshSnapshot() } catch (error) {}
+      try { Bridge.configure(JSON.parse(text())); root.refreshSnapshot() } catch (error) {
+        console.warn("agent-fold connection file invalid:", error)
+      }
     }
   }
 

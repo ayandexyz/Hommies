@@ -73,6 +73,11 @@ export async function startBridgeServer(
 async function handleRequest(request: IncomingMessage, response: ServerResponse, state: BridgeState): Promise<void> {
   const url = new URL(request.url ?? "/", "http://localhost");
   try {
+    if (request.method === "OPTIONS") {
+      response.writeHead(204, corsHeaders());
+      response.end();
+      return;
+    }
     if (request.method === "GET" && url.pathname === "/healthz") return sendJson(response, 200, { ok: true });
     if (!authorised(request, state)) return sendJson(response, 401, { error: "unauthorized" });
     if (request.method === "GET" && url.pathname === "/v1/pending") return sendJson(response, 200, snapshot(state));
@@ -199,15 +204,23 @@ function publish(state: BridgeState): void {
 }
 
 function openStream(response: ServerResponse, state: BridgeState): void {
-  response.writeHead(200, { "cache-control": "no-cache", connection: "keep-alive", "content-type": "text/event-stream" });
+  response.writeHead(200, { ...corsHeaders(), "cache-control": "no-cache", connection: "keep-alive", "content-type": "text/event-stream" });
   state.streams.add(response);
   response.write(`event: pending\ndata: ${JSON.stringify(snapshot(state))}\n\n`);
   response.on("close", () => state.streams.delete(response));
 }
 
 function sendJson(response: ServerResponse, status: number, body: unknown): void {
-  response.writeHead(status, { "content-type": "application/json; charset=utf-8" });
+  response.writeHead(status, { ...corsHeaders(), "content-type": "application/json; charset=utf-8" });
   response.end(JSON.stringify(body));
+}
+
+function corsHeaders(): Record<string, string> {
+  return {
+    "access-control-allow-origin": "*",
+    "access-control-allow-methods": "GET, POST, OPTIONS",
+    "access-control-allow-headers": "content-type, x-agent-fold-token",
+  };
 }
 
 async function readJson<T>(request: IncomingMessage): Promise<T> {
