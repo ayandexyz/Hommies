@@ -154,7 +154,15 @@ async function receiveClaudeQuestion(response: ServerResponse, input: ClaudeQues
 
     const answers = await new Promise<Readonly<Record<string, unknown>> | null>((resolve) => {
       const timer = setTimeout(() => { state.questions.delete(String(id)); publish(state); resolve(null); }, responseTimeoutMs);
-      state.questions.set(String(id), { item, input, answerSurface: "topbar", resolve, timer });
+      const entry: PendingQuestion = { item, input, answerSurface: "topbar", resolve, timer };
+      state.questions.set(String(id), entry);
+      onHookDisconnect(response, () => {
+        if (state.questions.get(String(id)) !== entry) return;
+        clearTimeout(timer);
+        state.questions.delete(String(id));
+        publish(state);
+        resolve(null);
+      });
       publish(state);
     });
     if (answers === null) return sendJson(response, 200, {});
@@ -187,6 +195,17 @@ function updatePreferences(response: ServerResponse, input: BridgePreferencesInp
   return sendJson(response, 200, { ok: true, questionAnswerSurface: state.questionAnswerSurface });
 }
 
+/**
+ * Runs `onDisconnect` if the hook process goes away (Esc in Claude, killed
+ * hook, timeout) before the bridge has answered it, so the bar does not keep
+ * showing a request nobody is waiting on.
+ */
+function onHookDisconnect(response: ServerResponse, onDisconnect: () => void): void {
+  response.once("close", () => {
+    if (!response.writableFinished) onDisconnect();
+  });
+}
+
 function authorised(request: IncomingMessage, state: BridgeState): boolean {
   return request.headers["x-agent-fold-token"] === state.token;
 }
@@ -205,6 +224,12 @@ async function receivePermission(response: ServerResponse, input: ClaudePermissi
       resolve({ behavior: "unchanged" });
     }, responseTimeoutMs);
     state.pending.set(id, { item, hookInput: input, provider, resolve, timer });
+    onHookDisconnect(response, () => {
+      if (!state.pending.delete(id)) return;
+      clearTimeout(timer);
+      publish(state);
+      resolve({ behavior: "unchanged" });
+    });
     publish(state);
   });
   if (result.behavior === "unchanged") return sendJson(response, 200, {});

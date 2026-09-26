@@ -333,6 +333,21 @@ Panel {
                   })
                 }
 
+                // "cancel" releases the hook without a decision, so the
+                // provider falls back to its native terminal prompt.
+                function respondPermission(decision) {
+                  Bridge.respond({
+                    threadId: threadColumn.threadData.threadId,
+                    requestId: itemData.id,
+                    decision: decision
+                  }).then(function() {
+                    if (root.hostWidget && typeof root.hostWidget.refreshSnapshot === "function")
+                      root.hostWidget.refreshSnapshot()
+                  }).catch(function(error) {
+                    console.warn("agent-fold permission response failed:", error)
+                  })
+                }
+
                 width: parent.width
                 implicitHeight: itemColumn.implicitHeight + Style.space(4)
                 Column {
@@ -502,6 +517,32 @@ Panel {
                   fontSize: Style.font.body
                   opacity: itemDelegate.readyToSubmit() ? 1 : 0.5
                   onClicked: itemDelegate.submitAnswers()
+                }
+
+                Row {
+                  id: permissionRow
+                  visible: itemDelegate.itemData.kind === "permission"
+                  width: parent.width
+                  spacing: Style.space(4)
+
+                  Repeater {
+                    model: [
+                      { label: "Allow", decision: "accept" },
+                      { label: "Deny", decision: "decline" },
+                      { label: "Ask in CLI", decision: "cancel" }
+                    ]
+
+                    delegate: Button {
+                      width: (permissionRow.width - permissionRow.spacing * 2) / 3
+                      text: modelData.label
+                      bordered: true
+                      selected: modelData.decision === "accept"
+                      foreground: root.barForeground
+                      fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+                      fontSize: Style.font.bodySmall
+                      onClicked: itemDelegate.respondPermission(modelData.decision)
+                    }
+                  }
                 }
                 }
               }
