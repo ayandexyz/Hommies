@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 /**
  * Runtime entry point — invoked by the Omarchy `service`-kind plugin.
  *

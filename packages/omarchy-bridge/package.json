@@ -7,6 +7,7 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
+    "agent-fold-bridge": "./dist/runtime.js",
     "agent-fold-claude-hook": "./dist/claude-hook.js",
     "agent-fold-codex-hook": "./dist/codex-hook.js"
   },
