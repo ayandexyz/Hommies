@@ -1,4 +1,4 @@
-import type { ApprovalRequestId, ProviderDriverKind, ThreadId } from "./localContracts.ts";
+import type { ApprovalRequestId, ProviderDriverKind, ThreadId } from "./localContracts.js";
 
 /**
  * Options for `startBridgeServer`.
@@ -58,6 +58,17 @@ export interface PendingResponse {
 export interface PendingResponseInput {
   readonly threadId: ThreadId;
   readonly requestId: ApprovalRequestId;
-  readonly decision?: "accept" | "acceptForSession" | "acceptAlways" | "decline" | "cancel";
+  readonly decision?: "accept" | "decline" | "cancel";
   readonly answers?: Readonly<Record<string, unknown>>;
+}
+
+/** Payload sent by Claude Code's PermissionRequest hook. */
+export interface ClaudePermissionHookInput {
+  readonly session_id: string;
+  readonly transcript_path?: string;
+  readonly cwd: string;
+  readonly hook_event_name?: "PermissionRequest";
+  readonly tool_name: string;
+  readonly tool_input: Record<string, unknown>;
+  readonly permission_suggestions?: ReadonlyArray<unknown>;
 }

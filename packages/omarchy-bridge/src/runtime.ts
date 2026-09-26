@@ -12,7 +12,7 @@
 import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
 
-import { startBridgeServer } from "./server.ts";
+import { startBridgeServer } from "./server.js";
 
 interface RuntimeOptions {
   readonly dataDir: string;

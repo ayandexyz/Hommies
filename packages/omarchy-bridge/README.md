@@ -29,9 +29,44 @@ The server binds to `127.0.0.1` only. Routes:
 The HTTP surface is the contract with the QML plugin; do not break it without a
 versioned path (`/v2/...`).
 
-## Status
+## Claude Code integration
 
-v0 scaffold. The HTTP routes return `501 Not Implemented` and the package builds
-but does not yet embed the projection pipeline.
+The first provider integration uses Claude Code's `PermissionRequest` command
+hook. It forwards the tool request to the local bridge and waits for an
+**Accept**, **Decline**, or **Cancel** response from agent-fold. If the bridge
+is not running, the hook produces no decision, so Claude Code keeps its normal
+terminal permission prompt.
 
-See `docs/plan.md` in the repo root for the extraction plan.
+After installing `@agent-fold/bridge`, add this hook to `~/.claude/settings.json`
+(replace the command with the absolute path to the installed package's
+`dist/claude-hook.js`):
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [{ "matcher": "AskUserQuestion", "hooks": [{ "type": "command", "command": "node /absolute/path/to/@agent-fold/bridge/dist/claude-hook.js" }] }],
+    "PostToolUse": [{ "matcher": "AskUserQuestion", "hooks": [{ "type": "command", "command": "node /absolute/path/to/@agent-fold/bridge/dist/claude-hook.js" }] }],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node /absolute/path/to/@agent-fold/bridge/dist/claude-hook.js",
+            "timeout": 305000
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+The bridge writes its loopback port and a per-start bearer token to
+`$XDG_DATA_HOME/agent-fold/port.json` (or `~/.local/share/agent-fold/port.json`).
+The hook reads that file; no network request leaves the machine. Claude's hook
+payload and pending permissions stay in memory and are discarded when the
+bridge exits.
+
+This initial integration is deliberately limited to permission decisions.
+Claude's ordinary interactive questions still belong to its terminal session;
+the API will surface them only once a safe response/resume mechanism exists.

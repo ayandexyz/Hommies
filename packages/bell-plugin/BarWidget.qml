@@ -1,6 +1,8 @@
 import QtQuick
 import Quickshell
+import Quickshell.Io
 import qs.Ui
+import "bridge.js" as Bridge
 
 /**
  * agent-fold bar widget.
@@ -51,6 +53,16 @@ BarWidget {
   implicitHeight: button.implicitHeight
 
   onBarChanged: injectPanel()
+
+  FileView {
+    path: (Quickshell.env("XDG_DATA_HOME") || Quickshell.env("HOME") + "/.local/share") + "/agent-fold/port.json"
+    watchChanges: true
+    printErrors: false
+    onFileChanged: reload()
+    onLoaded: {
+      try { Bridge.configure(JSON.parse(text())); root.refreshSnapshot() } catch (error) {}
+    }
+  }
 
   Timer {
     id: pollTimer

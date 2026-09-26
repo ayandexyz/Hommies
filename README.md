@@ -21,8 +21,11 @@ This is a pnpm workspace with two packages:
 
 ## Status
 
-v0 scaffold. The bridge HTTP surface, daemon lifecycle, and QML/JS wiring are not yet
-implemented — see the plan in `docs/plan.md` (TODO).
+The first vertical slice, Claude Code permission requests, is implemented in
+the bridge: its command hook waits for a response from the local HTTP API and
+returns Claude's documented allow/deny decision. The daemon lifecycle and QML
+client controls are still pending, so this is currently a provider integration
+and API rather than an installable end-to-end plugin.
 
 ## Layout
 
