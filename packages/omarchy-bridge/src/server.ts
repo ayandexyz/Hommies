@@ -11,6 +11,7 @@ const responseTimeoutMs = 5 * 60 * 1000;
 interface PendingPermission {
   readonly item: PendingItem;
   readonly hookInput: ClaudePermissionHookInput;
+  readonly provider: "claude" | "codex";
   readonly resolve: (decision: ClaudeHookDecision) => void;
   readonly timer: ReturnType<typeof setTimeout>;
 }
@@ -78,7 +79,10 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     if (request.method === "GET" && url.pathname === "/v1/stream") return openStream(response, state);
     if (request.method === "POST" && url.pathname === "/v1/respond") return respond(response, await readJson<PendingResponseInput>(request), state);
     if (request.method === "POST" && url.pathname === "/v1/providers/claude/permission") {
-      return await receiveClaudePermission(response, await readJson<ClaudePermissionHookInput>(request), state);
+      return await receivePermission(response, await readJson<ClaudePermissionHookInput>(request), "claude", state);
+    }
+    if (request.method === "POST" && url.pathname === "/v1/providers/codex/permission") {
+      return await receivePermission(response, await readJson<ClaudePermissionHookInput>(request), "codex", state);
     }
     if (request.method === "POST" && url.pathname === "/v1/providers/claude/question") {
       return await receiveClaudeQuestion(response, await readJson<ClaudeQuestionHookInput>(request), state);
@@ -110,11 +114,11 @@ function authorised(request: IncomingMessage, state: BridgeState): boolean {
   return request.headers["x-agent-fold-token"] === state.token;
 }
 
-async function receiveClaudePermission(response: ServerResponse, input: ClaudePermissionHookInput, state: BridgeState): Promise<void> {
+async function receivePermission(response: ServerResponse, input: ClaudePermissionHookInput, provider: "claude" | "codex", state: BridgeState): Promise<void> {
   if (!isClaudePermissionInput(input)) throw new Error("invalid Claude PermissionRequest payload");
   const id = ApprovalRequestId(randomUUID());
   const item: PendingItem = {
-    id, threadId: ThreadId(input.session_id), provider: "claude", kind: "permission",
+    id, threadId: ThreadId(input.session_id), provider, kind: "permission",
     summary: describeTool(input.tool_name, input.tool_input), createdAt: new Date().toISOString(),
   };
   const result = await new Promise<ClaudeHookDecision>((resolve) => {
@@ -123,7 +127,7 @@ async function receiveClaudePermission(response: ServerResponse, input: ClaudePe
       publish(state);
       resolve({ behavior: "unchanged" });
     }, responseTimeoutMs);
-    state.pending.set(id, { item, hookInput: input, resolve, timer });
+    state.pending.set(id, { item, hookInput: input, provider, resolve, timer });
     publish(state);
   });
   if (result.behavior === "unchanged") return sendJson(response, 200, {});
@@ -156,8 +160,9 @@ function respond(response: ServerResponse, input: PendingResponseInput, state: B
 
 function snapshot(state: BridgeState): PendingResponse {
   const threads = new Map<string, { threadId: ReturnType<typeof ThreadId>; title: string; items: PendingItem[] }>();
-  for (const { item, hookInput } of state.pending.values()) {
-    const thread = threads.get(item.threadId) ?? { threadId: item.threadId, title: `Claude Code — ${basename(hookInput.cwd) || hookInput.cwd}`, items: [] };
+  for (const { item, hookInput, provider } of state.pending.values()) {
+    const label = provider === "codex" ? "Codex" : "Claude Code";
+    const thread = threads.get(item.threadId) ?? { threadId: item.threadId, title: `${label} — ${basename(hookInput.cwd) || hookInput.cwd}`, items: [] };
     thread.items.push(item);
     threads.set(item.threadId, thread);
   }

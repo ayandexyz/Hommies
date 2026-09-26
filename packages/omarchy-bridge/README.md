@@ -70,3 +70,31 @@ bridge exits.
 This initial integration is deliberately limited to permission decisions.
 Claude's ordinary interactive questions still belong to its terminal session;
 the API will surface them only once a safe response/resume mechanism exists.
+
+## Codex integration
+
+Codex permission requests use the same local pending queue. Add this entry to
+`~/.codex/hooks.json`, preserving any existing hook groups:
+
+```json
+{
+  "hooks": {
+    "PermissionRequest": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node /absolute/path/to/@agent-fold/bridge/dist/codex-hook.js",
+            "timeout": 305
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+Review and trust the hook from Codex's `/hooks` screen before testing it. If
+the bridge is unavailable, the adapter exits without a decision and Codex
+keeps its native approval prompt.
