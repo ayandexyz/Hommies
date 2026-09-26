@@ -16,6 +16,11 @@ function respond(input) {
   return request("POST", "/v1/respond", input)
 }
 
+function setPreferences(input) {
+  if (!connection) return Promise.resolve({ ok: false })
+  return request("POST", "/v1/preferences", input)
+}
+
 function subscribe(_onUpdate) { return function() {} }
 
 function request(method, path, body) {

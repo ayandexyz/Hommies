@@ -23,6 +23,8 @@ BarWidget {
 
   readonly property bool opened: panelLoader.item ? panelLoader.item.opened === true : false
   readonly property bool popoutSwitchClosing: panelLoader.item ? panelLoader.item.popoutSwitchClosing === true : false
+  readonly property string questionAnswerSurface: String(setting("questionAnswerSurface", "Top bar")) === "Claude CLI"
+    ? "cli" : "topbar"
   property var snapshot: ({ totalCount: 0, threads: [] })
 
   function open() {
@@ -42,6 +44,7 @@ BarWidget {
     panelLoader.item.bar = root.bar
     panelLoader.item.anchorItem = button
     panelLoader.item.hostWidget = root
+    panelLoader.item.settings = root.settings
   }
   function refreshSnapshot() {
     if (typeof Bridge !== "undefined") {
@@ -50,11 +53,30 @@ BarWidget {
       })
     }
   }
+  function syncPreferences() {
+    if (typeof Bridge === "undefined") return
+    Bridge.setPreferences({ questionAnswerSurface: root.questionAnswerSurface }).catch((error) => {
+      console.warn("agent-fold preference sync failed:", error)
+    })
+  }
+  function setQuestionAnswerSurface(surface) {
+    var label = surface === "cli" ? "Claude CLI" : "Top bar"
+    var entry = { id: root.moduleName }
+    for (var key in root.settings) if (key !== "id") entry[key] = root.settings[key]
+    entry.questionAnswerSurface = label
+
+    // Update the live widget first, then persist through Omarchy's supported
+    // inline-settings API. The binding above synchronizes the bridge.
+    root.settings = entry
+    if (root.bar && root.bar.shell && typeof root.bar.shell.updateEntryInline === "function")
+      root.bar.shell.updateEntryInline(root.moduleName, entry)
+  }
 
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
 
   onBarChanged: injectPanel()
+  onQuestionAnswerSurfaceChanged: syncPreferences()
 
   FileView {
     path: (Quickshell.env("XDG_DATA_HOME") || Quickshell.env("HOME") + "/.local/share") + "/agent-fold/port.json"
@@ -62,7 +84,11 @@ BarWidget {
     printErrors: false
     onFileChanged: reload()
     onLoaded: {
-      try { Bridge.configure(JSON.parse(text())); root.refreshSnapshot() } catch (error) {
+      try {
+        Bridge.configure(JSON.parse(text()))
+        root.syncPreferences()
+        root.refreshSnapshot()
+      } catch (error) {
         console.warn("agent-fold connection file invalid:", error)
       }
     }

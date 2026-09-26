@@ -13,9 +13,23 @@
   },
   "barWidget": {
     "displayName": "Agent Fold",
+    "description": "Answer coding-agent questions and approvals from the bar, or mirror them while answering in the native CLI.",
     "category": "Notifications",
     "allowMultiple": false,
-    "defaultSection": "right"
+    "defaultSection": "right",
+    "defaults": {
+      "questionAnswerSurface": "Top bar"
+    },
+    "schema": [
+      {
+        "key": "questionAnswerSurface",
+        "type": "enum",
+        "label": "Answer Claude questions in",
+        "description": "Top bar pauses Claude until you answer here. Claude CLI mirrors the question in the bar while the native prompt owns the answer.",
+        "options": ["Top bar", "Claude CLI"],
+        "defaultValue": "Top bar"
+      }
+    ]
   },
   "omarchy": {
     "requires": ["node >=20.10"]
