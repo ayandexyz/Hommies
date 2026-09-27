@@ -14,6 +14,7 @@ Item {
   readonly property string logoFile: providerId === "claude" ? "claude.svg"
     : providerId === "codex" ? "codex.svg"
     : providerId === "opencode" ? "opencode.svg"
+    : providerId === "omacode" ? "omacode.svg"
     : ""
   readonly property bool logoReady: logoFile !== "" && logoImage.status === Image.Ready
 
@@ -43,7 +44,7 @@ Item {
     anchors.centerIn: parent
     visible: !root.logoReady
     text: root.providerId === "claude" ? "C" : root.providerId === "codex" ? "O"
-      : root.providerId === "opencode" ? "OC" : "?"
+      : root.providerId === "opencode" ? "OC" : root.providerId === "omacode" ? "OM" : "?"
     color: root.tint
     font.family: root.fontFamily
     font.pixelSize: Style.font.caption

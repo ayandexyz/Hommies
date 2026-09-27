@@ -29,7 +29,7 @@
         "key": "questionAnswerSurface",
         "type": "enum",
         "label": "Answer agent questions in",
-        "description": "Top bar lets you answer Claude and OpenCode questions here (Claude waits for the bar; OpenCode accepts whichever answer comes first). Claude CLI (applies to every agent) mirrors the question in the bar while the agent's own prompt owns the answer.",
+        "description": "Top bar lets you answer Claude, OpenCode, and Omacode questions here (Claude waits for the bar; OpenCode and Omacode accept whichever answer comes first). Claude CLI (applies to every agent) mirrors the question in the bar while the agent's own prompt owns the answer.",
         "options": [
           "Top bar",
           "Claude CLI"

@@ -1,7 +1,7 @@
 # agent-fold
 
 A Omarchy bar plugin that surfaces pending **questions** and **permission requests** from
-coding agents (Claude Code, Codex, OpenCode, Cursor, Grok, Antigravity) so you don't miss
+coding agents (Claude Code, Codex, OpenCode, Omacode, Cursor, Grok, Antigravity) so you don't miss
 them when you're away from the chat UI.
 
 ## Why

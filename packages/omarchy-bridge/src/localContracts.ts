@@ -18,6 +18,7 @@ export type ProviderDriverKind =
   | "claude"
   | "codex"
   | "opencode"
+  | "omacode"
   | "cursor"
   | "grok"
   | "antigravity"

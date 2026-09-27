@@ -8,7 +8,7 @@ import "bridge.js" as Bridge
  * agent-fold panel.
  *
  * Opened by BarWidget.qml on click. Lists pending questions and permissions
- * grouped by thread. Claude and OpenCode questions retain their headers, options,
+ * grouped by thread. Claude, OpenCode, and Omacode questions retain their headers, options,
  * descriptions, and multi-select behavior. The configured answer surface
  * decides whether controls here are interactive or mirror the CLI prompt.
  * `attention` items are notify-only: the agent ended its turn with a plain-text
@@ -149,7 +149,8 @@ Panel {
   onSelectedProviderChanged: selectedThreadId = ""
 
   function providerName(provider) {
-    return provider === "codex" ? "Codex" : provider === "opencode" ? "OpenCode" : "Claude"
+    return provider === "codex" ? "Codex" : provider === "opencode" ? "OpenCode"
+      : provider === "omacode" ? "Omacode" : "Claude"
   }
 
   function agentName(item) {
@@ -269,11 +270,11 @@ Panel {
       }
     }
 
-    // Keep ordinary prompts compact (wide enough for the three provider tabs),
+    // Keep ordinary prompts compact (wide enough for the four provider tabs),
     // then grow quickly enough for long option labels. KeyboardPanel still
     // clamps the result to the monitor width.
-    var width = 420 + Math.max(0, longest - 62) * 5
-    return Style.space(Math.min(720, width))
+    var width = 540 + Math.max(0, longest - 80) * 5
+    return Style.space(Math.min(760, width))
   }
 
   function open() {
@@ -372,7 +373,7 @@ Panel {
           width: parent.width
           spacing: Style.space(8)
 
-          readonly property real tabWidth: (width - spacing * 2) / 3
+          readonly property real tabWidth: (width - spacing * 3) / 4
 
           ProviderTab {
             width: providerTabs.tabWidth
@@ -411,6 +412,19 @@ Panel {
             fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
             fontSize: Style.font.body
             onClicked: { root.selectedProvider = "opencode"; root.selectedThreadId = "" }
+          }
+
+          ProviderTab {
+            width: providerTabs.tabWidth
+            providerId: "omacode"
+            providerName: "Omacode"
+            pendingCount: root.providerCount("omacode")
+            selected: root.selectedProvider === "omacode"
+            bordered: true
+            foreground: root.barForeground
+            fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+            fontSize: Style.font.body
+            onClicked: { root.selectedProvider = "omacode"; root.selectedThreadId = "" }
           }
         }
 

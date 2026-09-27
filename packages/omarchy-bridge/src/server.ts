@@ -55,17 +55,34 @@ interface PendingQuestion {
   readonly timer: ReturnType<typeof setTimeout>;
 }
 
-type Provider = "claude" | "codex" | "opencode";
+type Provider = "claude" | "codex" | "opencode" | "omacode";
+
+/**
+ * Agents whose integration runs in-process (OpenCode's plugin, Omacode's
+ * built-in) rather than as a blocking command hook. They send their own
+ * request ids so an answer given in the agent's TUI can clear the bar, and
+ * they take question answers as one label array per question.
+ */
+type RequestIdProvider = "opencode" | "omacode";
+function hasRequestIds(provider: Provider): provider is RequestIdProvider {
+  return provider === "opencode" || provider === "omacode";
+}
 
 /** `agent` names notifications and panel hints; `thread` prefixes `PendingResponse` thread titles. */
 const providerLabels: Record<Provider, { readonly agent: string; readonly thread: string }> = {
   claude: { agent: "Claude", thread: "Claude Code" },
   codex: { agent: "Codex", thread: "Codex" },
   opencode: { agent: "OpenCode", thread: "OpenCode" },
+  omacode: { agent: "Omacode", thread: "Omacode" },
 };
 
 function providerOf(item: PendingItem): Provider {
-  return item.provider === "codex" ? "codex" : item.provider === "opencode" ? "opencode" : "claude";
+  switch (item.provider) {
+    case "codex": return "codex";
+    case "opencode": return "opencode";
+    case "omacode": return "omacode";
+    default: return "claude";
+  }
 }
 
 interface PendingAttention {
@@ -149,11 +166,18 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     if (request.method === "POST" && url.pathname === "/v1/providers/codex/permission") {
       return await receivePermission(response, await readJson<ClaudePermissionHookInput>(request), "codex", state);
     }
-    if (request.method === "POST" && url.pathname === "/v1/providers/opencode/permission") {
-      return await receivePermission(response, await readJson<ClaudePermissionHookInput>(request), "opencode", state);
-    }
-    if (request.method === "POST" && url.pathname === "/v1/providers/opencode/permission/resolved") {
-      return resolveOpenCodePermission(response, await readJson<OpenCodeResolvedInput>(request), state);
+    const inProcess = /^\/v1\/providers\/(opencode|omacode)\/(permission|question)(\/resolved)?$/.exec(url.pathname);
+    if (request.method === "POST" && inProcess) {
+      const provider = inProcess[1] as RequestIdProvider;
+      const resolved = inProcess[3] !== undefined;
+      if (inProcess[2] === "permission") {
+        return resolved
+          ? resolveRequestIdPermission(response, await readJson<OpenCodeResolvedInput>(request), provider, state)
+          : await receivePermission(response, await readJson<ClaudePermissionHookInput>(request), provider, state);
+      }
+      return resolved
+        ? resolveRequestIdQuestion(response, await readJson<OpenCodeResolvedInput>(request), state)
+        : await receiveQuestion(response, openCodeQuestionInput(await readJson<OpenCodeQuestionInput>(request)), provider, state);
     }
     if (request.method === "POST" && url.pathname === "/v1/providers/claude/question") {
       return await receiveQuestion(response, await readJson<ClaudeQuestionHookInput>(request), "claude", state);
@@ -161,13 +185,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     if (request.method === "POST" && url.pathname === "/v1/providers/claude/question/resolved") {
       return resolveClaudeQuestion(response, await readJson<ClaudeQuestionHookInput>(request), state);
     }
-    if (request.method === "POST" && url.pathname === "/v1/providers/opencode/question") {
-      return await receiveQuestion(response, openCodeQuestionInput(await readJson<OpenCodeQuestionInput>(request)), "opencode", state);
-    }
-    if (request.method === "POST" && url.pathname === "/v1/providers/opencode/question/resolved") {
-      return resolveOpenCodeQuestion(response, await readJson<OpenCodeResolvedInput>(request), state);
-    }
-    const turn = /^\/v1\/providers\/(claude|codex|opencode)\/(stop|resume)$/.exec(url.pathname);
+    const turn = /^\/v1\/providers\/(claude|codex|opencode|omacode)\/(stop|resume)$/.exec(url.pathname);
     if (request.method === "POST" && turn) {
       const provider = turn[1] as Provider;
       const input = await readJson<ClaudeTurnHookInput>(request);
@@ -226,8 +244,8 @@ function clearAttention(state: BridgeState, sessionId: string): boolean {
 }
 
 /**
- * Claude's AskUserQuestion (PreToolUse) and OpenCode's `question` tool. OpenCode
- * questions arrive already converted to the AskUserQuestion shape.
+ * Claude's AskUserQuestion (PreToolUse) and OpenCode's and Omacode's `question`
+ * tools. Their questions arrive already converted to the AskUserQuestion shape.
  */
 async function receiveQuestion(response: ServerResponse, input: ClaudeQuestionHookInput, provider: Provider, state: BridgeState): Promise<void> {
   if (input.hook_event_name === "PreToolUse" && input.tool_name === "AskUserQuestion") {
@@ -269,7 +287,7 @@ async function receiveQuestion(response: ServerResponse, input: ClaudeQuestionHo
       publish(state);
     });
     if (answers === null) return sendJson(response, 200, {});
-    if (provider === "opencode") return sendJson(response, 200, { answers: openCodeAnswers(questions, answers) });
+    if (hasRequestIds(provider)) return sendJson(response, 200, { answers: openCodeAnswers(questions, answers) });
     return sendJson(response, 200, { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "allow", updatedInput: { ...input.tool_input, answers } } });
   } else throw new Error("invalid Claude question hook payload");
 }
@@ -286,7 +304,7 @@ function dropQuestion(state: BridgeState, id: string): boolean {
 
 function openCodeQuestionInput(input: OpenCodeQuestionInput): ClaudeQuestionHookInput {
   if (!input || typeof input.session_id !== "string" || typeof input.request_id !== "string" || !Array.isArray(input.questions)) {
-    throw new Error("invalid OpenCode question payload");
+    throw new Error("invalid question payload");
   }
   return {
     session_id: input.session_id,
@@ -300,7 +318,7 @@ function openCodeQuestionInput(input: OpenCodeQuestionInput): ClaudeQuestionHook
 }
 
 /**
- * OpenCode wants one array of labels per question, in order. The panel joins
+ * OpenCode and Omacode want one array of labels per question, in order. The panel joins
  * multi-select picks with ", ", so split them back when every piece is an
  * option label; anything else is a custom answer.
  */
@@ -317,18 +335,23 @@ function openCodeAnswers(
   });
 }
 
-function resolveOpenCodeQuestion(response: ServerResponse, input: OpenCodeResolvedInput, state: BridgeState): void {
+function resolveRequestIdQuestion(response: ServerResponse, input: OpenCodeResolvedInput, state: BridgeState): void {
   if (!input || typeof input.session_id !== "string" || typeof input.request_id !== "string") {
-    throw new Error("invalid OpenCode question resolution payload");
+    throw new Error("invalid question resolution payload");
   }
   if (dropQuestion(state, questionKey(input.session_id, input.request_id))) publish(state);
   return sendJson(response, 200, { ok: true });
 }
 
-function resolveOpenCodePermission(response: ServerResponse, input: OpenCodeResolvedInput, state: BridgeState): void {
-  if (!input || typeof input.request_id !== "string") throw new Error("invalid OpenCode permission resolution payload");
+function resolveRequestIdPermission(
+  response: ServerResponse,
+  input: OpenCodeResolvedInput,
+  provider: RequestIdProvider,
+  state: BridgeState,
+): void {
+  if (!input || typeof input.request_id !== "string") throw new Error("invalid permission resolution payload");
   const pending = state.pending.get(input.request_id);
-  if (pending && pending.provider === "opencode") {
+  if (pending && pending.provider === provider) {
     clearTimeout(pending.timer);
     state.pending.delete(input.request_id);
     pending.resolve({ behavior: "unchanged" });
@@ -416,8 +439,8 @@ async function receivePermission(response: ServerResponse, input: ClaudePermissi
   if (!isClaudePermissionInput(input)) throw new Error("invalid Claude PermissionRequest payload");
   // A new request means the agent is working again in this session.
   clearAttention(state, input.session_id);
-  // OpenCode ids let its plugin clear the item when the TUI answers first.
-  const id = ApprovalRequestId(provider === "opencode" && typeof input.request_id === "string" && input.request_id.length > 0
+  // OpenCode and Omacode ids let their integrations clear the item when the TUI answers first.
+  const id = ApprovalRequestId(hasRequestIds(provider) && typeof input.request_id === "string" && input.request_id.length > 0
     ? input.request_id
     : randomUUID());
   const previous = state.pending.get(id);

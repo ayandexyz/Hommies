@@ -174,3 +174,25 @@ Restart OpenCode after changing the config. The plugin answers OpenCode through
 the in-process client it is given, and it reaches the bridge only through
 `port.json` on loopback. If the bridge is not running, the plugin does nothing,
 and OpenCode behaves as it would without it.
+
+## Omacode integration
+
+Omacode (FreeCode) ships the integration itself, as a built-in of
+`freecode serve` (`apps/core/src/hooks/builtin/agent-fold.ts`); there is
+nothing to register. It posts to `/v1/providers/omacode/*` with the same
+request-id protocol as the OpenCode plugin:
+
+- **Permissions**: Accept answers `allow-once`, Decline answers `deny`, Cancel
+  leaves the prompt to Omacode. Wider grants are only offered in Omacode's own
+  prompt, where the rule they persist is visible.
+- **Questions** from Omacode's `question` tool, including multi-select and
+  typed answers.
+- **Turn ends**: plain-text questions become `attention` items and anything
+  else becomes `finished`. Items clear when the next turn starts or you
+  interrupt the turn; a turn that failed is not reported.
+- **Session names** from Omacode's session title, grouped by project folder.
+
+Omacode keeps showing its own prompt, and whichever surface answers first wins.
+It reads `port.json` on every report, so it follows a restarted bridge, and does
+nothing when the bridge is not running. `FREECODE_AGENT_FOLD=0` turns it off.
+A headless `freecode run` never reports.
