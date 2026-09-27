@@ -269,9 +269,10 @@ Panel {
       }
     }
 
-    // Keep ordinary prompts compact, then grow quickly enough for long option
-    // labels. KeyboardPanel still clamps the result to the monitor width.
-    var width = 360 + Math.max(0, longest - 50) * 5
+    // Keep ordinary prompts compact (wide enough for the three provider tabs),
+    // then grow quickly enough for long option labels. KeyboardPanel still
+    // clamps the result to the monitor width.
+    var width = 420 + Math.max(0, longest - 62) * 5
     return Style.space(Math.min(720, width))
   }
 
