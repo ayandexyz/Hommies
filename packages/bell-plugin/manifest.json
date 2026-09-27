@@ -28,8 +28,8 @@
       {
         "key": "questionAnswerSurface",
         "type": "enum",
-        "label": "Answer Claude questions in",
-        "description": "Top bar pauses Claude until you answer here. Claude CLI mirrors the question in the bar while the native prompt owns the answer.",
+        "label": "Answer agent questions in",
+        "description": "Top bar lets you answer Claude and OpenCode questions here (Claude waits for the bar; OpenCode accepts whichever answer comes first). Claude CLI (applies to every agent) mirrors the question in the bar while the agent's own prompt owns the answer.",
         "options": [
           "Top bar",
           "Claude CLI"

@@ -60,7 +60,7 @@ export interface PendingItem {
   readonly kind: PendingItemKind;
   readonly summary: string;
   readonly createdAt: string;
-  /** Present for Claude AskUserQuestion items. Optional for HTTP compatibility. */
+  /** Present for Claude AskUserQuestion and OpenCode question items. Optional for HTTP compatibility. */
   readonly questions?: ReadonlyArray<PendingQuestionPrompt>;
   /** The surface that owns the response; the other surface is display-only. */
   readonly answerSurface?: QuestionAnswerSurface;
@@ -113,10 +113,37 @@ export interface ClaudePermissionHookInput {
   readonly permission_suggestions?: ReadonlyArray<unknown>;
   /** Added by agent-fold's hook adapter from the session transcript. */
   readonly session_title?: string;
+  /**
+   * OpenCode's own permission id (`per_...`). The OpenCode plugin sends it so
+   * `/v1/providers/opencode/permission/resolved` can clear the item when the
+   * request is answered in OpenCode's TUI.
+   */
+  readonly request_id?: string;
+}
+
+/** A question from OpenCode's `question` tool, as sent by the OpenCode plugin. */
+export interface OpenCodeQuestionInput {
+  readonly session_id: string;
+  readonly cwd?: string;
+  readonly session_title?: string;
+  /** OpenCode's question id (`que_...`). */
+  readonly request_id: string;
+  readonly questions: ReadonlyArray<{
+    readonly question: string;
+    readonly header?: string;
+    readonly options?: ReadonlyArray<{ readonly label: string; readonly description?: string }>;
+    readonly multiple?: boolean;
+  }>;
+}
+
+/** Sent by the OpenCode plugin when a request was answered outside the bar. */
+export interface OpenCodeResolvedInput {
+  readonly session_id: string;
+  readonly request_id: string;
 }
 
 /**
- * Body posted by the Claude and Codex hook adapters for Stop,
+ * Body posted by the Claude and Codex hook adapters and the OpenCode plugin for Stop,
  * UserPromptSubmit, and SessionEnd. The adapter resolves
  * `last_assistant_message` from the transcript when the agent does not
  * supply it.

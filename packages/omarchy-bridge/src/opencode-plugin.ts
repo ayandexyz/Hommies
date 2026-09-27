@@ -1,0 +1,263 @@
+/**
+ * OpenCode server plugin: mirrors permission requests, `question` tool calls,
+ * and turn ends into agent-fold, and answers OpenCode with what you pick in
+ * the bar.
+ *
+ * OpenCode has no command hooks, so this runs inside OpenCode and talks to it
+ * through the plugin's in-process client. Requests stay open in OpenCode's TUI
+ * too; whichever surface answers first wins, and the other one is cleared.
+ * Subagent sessions are reported under their root session so the bar shows
+ * one row per conversation.
+ *
+ * Only the plugin function is exported: OpenCode calls every export of a
+ * plugin module as a plugin.
+ */
+import { postToBridge, readConnection } from "./hook-common.js";
+
+interface RequestOptions {
+  readonly url: string;
+  readonly path?: Readonly<Record<string, string>>;
+  readonly query?: Readonly<Record<string, string | number>>;
+  readonly body?: unknown;
+  readonly headers?: Readonly<Record<string, string>>;
+}
+
+/** The hey-api client behind `input.client`; it reaches OpenCode's server in-process. */
+interface OpenCodeHttp {
+  get(options: RequestOptions): Promise<{ readonly data?: unknown }>;
+  post(options: RequestOptions): Promise<{ readonly data?: unknown }>;
+}
+
+interface PluginInput {
+  readonly client: { readonly _client?: OpenCodeHttp };
+}
+
+interface OpenCodeEvent {
+  readonly type: string;
+  readonly properties: Readonly<Record<string, unknown>>;
+}
+
+interface SessionInfo {
+  readonly id: string;
+  readonly directory?: string;
+  readonly title?: string;
+  readonly parentID?: string;
+}
+
+const hookTimeoutMs = 5 * 60 * 1000 + 5_000;
+const turnTimeoutMs = 2_000;
+/** OpenCode names sessions like this until it has generated a title. */
+const placeholderTitle = /^(New|Child) session - \d{4}-\d{2}-\d{2}T/;
+
+export const AgentFoldOpenCode = async (input: PluginInput) => {
+  const http = input.client._client;
+  /** Child session id → root session id. Parents never change. */
+  const roots = new Map<string, string>();
+  /** Requests already forwarded, in case OpenCode delivers an event twice. */
+  const forwarded = new Set<string>();
+  /** Sessions the user interrupted; their next idle is not a finished turn. */
+  const aborted = new Set<string>();
+
+  const getSession = async (id: string): Promise<SessionInfo | null> => {
+    if (!http) return null;
+    try {
+      const { data } = await http.get({ url: "/session/{sessionID}", path: { sessionID: id } });
+      return isSession(data) ? data : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const rootSession = async (id: string): Promise<SessionInfo | null> => {
+    let session = await getSession(roots.get(id) ?? id);
+    for (let depth = 0; session?.parentID && depth < 8; depth++) session = await getSession(session.parentID);
+    if (session) roots.set(id, session.id);
+    return session;
+  };
+
+  /** Fields every bridge request about a session carries. */
+  const sessionFields = (session: SessionInfo): Record<string, string> => ({
+    session_id: session.id,
+    ...(session.directory ? { cwd: session.directory } : {}),
+    ...(session.title && !placeholderTitle.test(session.title) ? { session_title: session.title } : {}),
+  });
+
+  const send = async (path: string, body: unknown, timeoutMs: number): Promise<unknown> => {
+    const connection = await readConnection();
+    if (connection === null) return null;
+    const response = await postToBridge(connection, path, JSON.stringify(body), timeoutMs);
+    return response.ok ? await response.json() as unknown : null;
+  };
+
+  const resume = (sessionId: string, event: "UserPromptSubmit" | "SessionEnd"): Promise<unknown> =>
+    send("/v1/providers/opencode/resume", { hook_event_name: event, session_id: roots.get(sessionId) ?? sessionId }, turnTimeoutMs);
+
+  const onPermission = async (request: Readonly<Record<string, unknown>>): Promise<void> => {
+    const id = request.id;
+    const sessionId = request.sessionID;
+    if (!http || typeof id !== "string" || typeof sessionId !== "string" || forwarded.has(id)) return;
+    const session = await rootSession(sessionId);
+    if (!session) return;
+    forwarded.add(id);
+    try {
+      const result = await send("/v1/providers/opencode/permission", {
+        ...sessionFields(session),
+        hook_event_name: "PermissionRequest",
+        request_id: id,
+        tool_name: typeof request.permission === "string" ? request.permission : "permission",
+        tool_input: permissionDetail(request),
+      }, hookTimeoutMs);
+      const behavior = decisionOf(result);
+      // No decision (cancel, timeout, answered in the TUI): OpenCode keeps its prompt.
+      if (behavior === null) return;
+      await http.post({
+        url: "/permission/{requestID}/reply",
+        path: { requestID: id },
+        body: { reply: behavior === "allow" ? "once" : "reject" },
+        headers: { "content-type": "application/json" },
+      });
+    } finally {
+      forwarded.delete(id);
+    }
+  };
+
+  const onQuestion = async (request: Readonly<Record<string, unknown>>): Promise<void> => {
+    const id = request.id;
+    const sessionId = request.sessionID;
+    if (!http || typeof id !== "string" || typeof sessionId !== "string" || !Array.isArray(request.questions) || forwarded.has(id)) return;
+    const session = await rootSession(sessionId);
+    if (!session) return;
+    forwarded.add(id);
+    try {
+      const result = await send("/v1/providers/opencode/question", {
+        ...sessionFields(session), request_id: id, questions: request.questions,
+      }, hookTimeoutMs);
+      const answers = answersOf(result);
+      if (answers === null) return;
+      await http.post({
+        url: "/question/{requestID}/reply",
+        path: { requestID: id },
+        body: { answers },
+        headers: { "content-type": "application/json" },
+      });
+    } finally {
+      forwarded.delete(id);
+    }
+  };
+
+  /** A request was answered (in the TUI or by us): drop it from the bar. */
+  const onResolved = async (kind: "permission" | "question", reply: Readonly<Record<string, unknown>>): Promise<void> => {
+    if (typeof reply.requestID !== "string" || typeof reply.sessionID !== "string") return;
+    await send(`/v1/providers/opencode/${kind}/resolved`, {
+      session_id: roots.get(reply.sessionID) ?? reply.sessionID, request_id: reply.requestID,
+    }, turnTimeoutMs);
+  };
+
+  const onIdle = async (sessionId: string): Promise<void> => {
+    const session = await getSession(sessionId);
+    // Subagents finishing is not the conversation finishing.
+    if (!session || session.parentID) return;
+    if (aborted.delete(sessionId)) {
+      await resume(sessionId, "UserPromptSubmit");
+      return;
+    }
+    const message = await lastAssistantText(sessionId);
+    if (message === null) return;
+    await send("/v1/providers/opencode/stop", {
+      ...sessionFields(session), hook_event_name: "Stop", last_assistant_message: message,
+    }, turnTimeoutMs);
+  };
+
+  const lastAssistantText = async (sessionId: string): Promise<string | null> => {
+    if (!http) return null;
+    try {
+      const { data } = await http.get({ url: "/session/{sessionID}/message", path: { sessionID: sessionId }, query: { limit: 1 } });
+      return Array.isArray(data) ? finalText(data.at(-1)) : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const handle = async (event: OpenCodeEvent): Promise<void> => {
+    const properties = event.properties;
+    const sessionId = typeof properties.sessionID === "string" ? properties.sessionID : null;
+    switch (event.type) {
+      case "permission.asked": return onPermission(properties);
+      case "permission.replied": return onResolved("permission", properties);
+      case "question.asked": return onQuestion(properties);
+      case "question.replied":
+      case "question.rejected": return onResolved("question", properties);
+      case "session.idle": return sessionId === null ? undefined : onIdle(sessionId);
+      case "session.error": {
+        const error = properties.error;
+        if (sessionId !== null && isRecord(error) && error.name === "MessageAbortedError") aborted.add(sessionId);
+        return;
+      }
+      case "session.deleted":
+        if (sessionId === null) return;
+        await resume(sessionId, "SessionEnd");
+        roots.delete(sessionId);
+        return;
+      default: return;
+    }
+  };
+
+  return {
+    // Never await here: a pending permission would stall OpenCode's other events.
+    event: async ({ event }: { readonly event: OpenCodeEvent }): Promise<void> => {
+      void handle(event).catch(() => {
+        // The bridge is optional; OpenCode keeps its own prompts.
+      });
+    },
+    "chat.message": async ({ sessionID }: { readonly sessionID: string }): Promise<void> => {
+      aborted.delete(sessionID);
+      void resume(sessionID, "UserPromptSubmit").catch(() => undefined);
+    },
+  };
+};
+
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+  return value !== null && typeof value === "object";
+}
+
+function isSession(value: unknown): value is SessionInfo {
+  return isRecord(value) && typeof value.id === "string";
+}
+
+/** The fields `describeTool` in the bridge reads, without large diffs. */
+function permissionDetail(request: Readonly<Record<string, unknown>>): Record<string, string> {
+  const metadata = isRecord(request.metadata) ? request.metadata : {};
+  const patterns = Array.isArray(request.patterns) ? request.patterns.filter((pattern) => typeof pattern === "string") : [];
+  const filePath = typeof metadata.filepath === "string" ? metadata.filepath : typeof metadata.filePath === "string" ? metadata.filePath : null;
+  return {
+    ...(typeof metadata.command === "string" ? { command: metadata.command } : {}),
+    ...(filePath === null ? {} : { file_path: filePath }),
+    ...(patterns.length > 0 ? { description: patterns.join(" ") } : {}),
+  };
+}
+
+function decisionOf(result: unknown): "allow" | "deny" | null {
+  if (!isRecord(result) || !isRecord(result.hookSpecificOutput)) return null;
+  const decision = result.hookSpecificOutput.decision;
+  if (!isRecord(decision)) return null;
+  return decision.behavior === "allow" || decision.behavior === "deny" ? decision.behavior : null;
+}
+
+function answersOf(result: unknown): string[][] | null {
+  if (!isRecord(result) || !Array.isArray(result.answers)) return null;
+  const answers = result.answers.filter((answer): answer is string[] =>
+    Array.isArray(answer) && answer.every((label) => typeof label === "string"));
+  return answers.length === result.answers.length ? answers : null;
+}
+
+/** Text of the final assistant message; `null` when the turn ended without any. */
+function finalText(message: unknown): string | null {
+  if (!isRecord(message) || !isRecord(message.info) || message.info.role !== "assistant" || !Array.isArray(message.parts)) return null;
+  const text = message.parts
+    .filter((part): part is Readonly<Record<string, unknown>> =>
+      isRecord(part) && part.type === "text" && typeof part.text === "string" && part.synthetic !== true && part.ignored !== true)
+    .map((part) => String(part.text))
+    .join("\n")
+    .trim();
+  return text.length > 0 ? text : null;
+}

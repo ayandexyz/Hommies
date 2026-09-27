@@ -9,6 +9,8 @@ import type {
   BridgeServerOptions,
   ClaudePermissionHookInput,
   ClaudeTurnHookInput,
+  OpenCodeQuestionInput,
+  OpenCodeResolvedInput,
   PendingItem,
   PendingQuestionPrompt,
   PendingResponse,
@@ -25,7 +27,7 @@ const attentionTimeoutMs = 12 * 60 * 60 * 1000;
 interface PendingPermission {
   readonly item: PendingItem;
   readonly hookInput: ClaudePermissionHookInput;
-  readonly provider: "claude" | "codex";
+  readonly provider: Provider;
   readonly resolve: (decision: ClaudeHookDecision) => void;
   readonly timer: ReturnType<typeof setTimeout>;
 }
@@ -46,13 +48,25 @@ interface BridgeState {
 
 interface PendingQuestion {
   readonly item: PendingItem;
+  readonly provider: Provider;
   readonly input: ClaudeQuestionHookInput;
   readonly answerSurface: QuestionAnswerSurface;
   readonly resolve?: (answers: Readonly<Record<string, unknown>> | null) => void;
   readonly timer: ReturnType<typeof setTimeout>;
 }
 
-type Provider = "claude" | "codex";
+type Provider = "claude" | "codex" | "opencode";
+
+/** `agent` names notifications and panel hints; `thread` prefixes `PendingResponse` thread titles. */
+const providerLabels: Record<Provider, { readonly agent: string; readonly thread: string }> = {
+  claude: { agent: "Claude", thread: "Claude Code" },
+  codex: { agent: "Codex", thread: "Codex" },
+  opencode: { agent: "OpenCode", thread: "OpenCode" },
+};
+
+function providerOf(item: PendingItem): Provider {
+  return item.provider === "codex" ? "codex" : item.provider === "opencode" ? "opencode" : "claude";
+}
 
 interface PendingAttention {
   readonly item: PendingItem;
@@ -61,7 +75,7 @@ interface PendingAttention {
   readonly timer: ReturnType<typeof setTimeout>;
 }
 
-/** Starts the local daemon that Claude Code's hook and the QML client share. */
+/** Starts the local daemon that the agent adapters and the QML client share. */
 export async function startBridgeServer(
   options: BridgeServerOptions,
 ): Promise<{ readonly port: number; readonly close: () => Promise<void> }> {
@@ -135,13 +149,25 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     if (request.method === "POST" && url.pathname === "/v1/providers/codex/permission") {
       return await receivePermission(response, await readJson<ClaudePermissionHookInput>(request), "codex", state);
     }
+    if (request.method === "POST" && url.pathname === "/v1/providers/opencode/permission") {
+      return await receivePermission(response, await readJson<ClaudePermissionHookInput>(request), "opencode", state);
+    }
+    if (request.method === "POST" && url.pathname === "/v1/providers/opencode/permission/resolved") {
+      return resolveOpenCodePermission(response, await readJson<OpenCodeResolvedInput>(request), state);
+    }
     if (request.method === "POST" && url.pathname === "/v1/providers/claude/question") {
-      return await receiveClaudeQuestion(response, await readJson<ClaudeQuestionHookInput>(request), state);
+      return await receiveQuestion(response, await readJson<ClaudeQuestionHookInput>(request), "claude", state);
     }
     if (request.method === "POST" && url.pathname === "/v1/providers/claude/question/resolved") {
       return resolveClaudeQuestion(response, await readJson<ClaudeQuestionHookInput>(request), state);
     }
-    const turn = /^\/v1\/providers\/(claude|codex)\/(stop|resume)$/.exec(url.pathname);
+    if (request.method === "POST" && url.pathname === "/v1/providers/opencode/question") {
+      return await receiveQuestion(response, openCodeQuestionInput(await readJson<OpenCodeQuestionInput>(request)), "opencode", state);
+    }
+    if (request.method === "POST" && url.pathname === "/v1/providers/opencode/question/resolved") {
+      return resolveOpenCodeQuestion(response, await readJson<OpenCodeResolvedInput>(request), state);
+    }
+    const turn = /^\/v1\/providers\/(claude|codex|opencode)\/(stop|resume)$/.exec(url.pathname);
     if (request.method === "POST" && turn) {
       const provider = turn[1] as Provider;
       const input = await readJson<ClaudeTurnHookInput>(request);
@@ -199,24 +225,23 @@ function clearAttention(state: BridgeState, sessionId: string): boolean {
   return true;
 }
 
-async function receiveClaudeQuestion(response: ServerResponse, input: ClaudeQuestionHookInput, state: BridgeState): Promise<void> {
+/**
+ * Claude's AskUserQuestion (PreToolUse) and OpenCode's `question` tool. OpenCode
+ * questions arrive already converted to the AskUserQuestion shape.
+ */
+async function receiveQuestion(response: ServerResponse, input: ClaudeQuestionHookInput, provider: Provider, state: BridgeState): Promise<void> {
   if (input.hook_event_name === "PreToolUse" && input.tool_name === "AskUserQuestion") {
-    // A new tool call means Claude is working again in this session.
+    // A new tool call means the agent is working again in this session.
     clearAttention(state, input.session_id);
     const id = ApprovalRequestId(questionKey(input.session_id, input.tool_use_id));
     const questions = parseQuestions(input.tool_input);
     const item: PendingItem = {
-      id, threadId: ThreadId(input.session_id), provider: "claude", kind: "question",
-      summary: questions[0]?.question ?? "Claude needs your input",
+      id, threadId: ThreadId(input.session_id), provider, kind: "question",
+      summary: questions[0]?.question ?? `${providerLabels[provider].agent} needs your input`,
       createdAt: new Date().toISOString(), questions,
       answerSurface: state.questionAnswerSurface,
     };
-    const previous = state.questions.get(String(id));
-    if (previous) {
-      clearTimeout(previous.timer);
-      previous.resolve?.(null);
-      state.questions.delete(String(id));
-    }
+    dropQuestion(state, String(id));
     announce(state, item, input.cwd, input.session_title);
 
     if (state.questionAnswerSurface === "cli") {
@@ -224,15 +249,15 @@ async function receiveClaudeQuestion(response: ServerResponse, input: ClaudeQues
         state.questions.delete(String(id));
         publish(state);
       }, responseTimeoutMs);
-      state.questions.set(String(id), { item, input, answerSurface: "cli", timer });
+      state.questions.set(String(id), { item, provider, input, answerSurface: "cli", timer });
       publish(state);
-      // No hook decision: Claude continues into its native AskUserQuestion UI.
+      // No answer: the agent's native question UI owns it.
       return sendJson(response, 200, {});
     }
 
     const answers = await new Promise<Readonly<Record<string, unknown>> | null>((resolve) => {
       const timer = setTimeout(() => { state.questions.delete(String(id)); publish(state); resolve(null); }, responseTimeoutMs);
-      const entry: PendingQuestion = { item, input, answerSurface: "topbar", resolve, timer };
+      const entry: PendingQuestion = { item, provider, input, answerSurface: "topbar", resolve, timer };
       state.questions.set(String(id), entry);
       onHookDisconnect(response, () => {
         if (state.questions.get(String(id)) !== entry) return;
@@ -244,8 +269,72 @@ async function receiveClaudeQuestion(response: ServerResponse, input: ClaudeQues
       publish(state);
     });
     if (answers === null) return sendJson(response, 200, {});
+    if (provider === "opencode") return sendJson(response, 200, { answers: openCodeAnswers(questions, answers) });
     return sendJson(response, 200, { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "allow", updatedInput: { ...input.tool_input, answers } } });
   } else throw new Error("invalid Claude question hook payload");
+}
+
+/** Removes a question and releases a hook still waiting on it. */
+function dropQuestion(state: BridgeState, id: string): boolean {
+  const question = state.questions.get(id);
+  if (!question) return false;
+  clearTimeout(question.timer);
+  state.questions.delete(id);
+  question.resolve?.(null);
+  return true;
+}
+
+function openCodeQuestionInput(input: OpenCodeQuestionInput): ClaudeQuestionHookInput {
+  if (!input || typeof input.session_id !== "string" || typeof input.request_id !== "string" || !Array.isArray(input.questions)) {
+    throw new Error("invalid OpenCode question payload");
+  }
+  return {
+    session_id: input.session_id,
+    ...(typeof input.cwd === "string" ? { cwd: input.cwd } : {}),
+    ...(typeof input.session_title === "string" ? { session_title: input.session_title } : {}),
+    hook_event_name: "PreToolUse",
+    tool_name: "AskUserQuestion",
+    tool_use_id: input.request_id,
+    tool_input: { questions: input.questions.map((question) => ({ ...question, multiSelect: question.multiple === true })) },
+  };
+}
+
+/**
+ * OpenCode wants one array of labels per question, in order. The panel joins
+ * multi-select picks with ", ", so split them back when every piece is an
+ * option label; anything else is a custom answer.
+ */
+function openCodeAnswers(
+  questions: ReadonlyArray<PendingQuestionPrompt>,
+  answers: Readonly<Record<string, unknown>>,
+): string[][] {
+  return questions.map((question) => {
+    const answer = String(answers[question.id] ?? "");
+    if (!question.multiSelect) return [answer];
+    const labels = new Set(question.options.map((option) => option.label));
+    const pieces = answer.split(", ");
+    return pieces.every((piece) => labels.has(piece)) ? pieces : [answer];
+  });
+}
+
+function resolveOpenCodeQuestion(response: ServerResponse, input: OpenCodeResolvedInput, state: BridgeState): void {
+  if (!input || typeof input.session_id !== "string" || typeof input.request_id !== "string") {
+    throw new Error("invalid OpenCode question resolution payload");
+  }
+  if (dropQuestion(state, questionKey(input.session_id, input.request_id))) publish(state);
+  return sendJson(response, 200, { ok: true });
+}
+
+function resolveOpenCodePermission(response: ServerResponse, input: OpenCodeResolvedInput, state: BridgeState): void {
+  if (!input || typeof input.request_id !== "string") throw new Error("invalid OpenCode permission resolution payload");
+  const pending = state.pending.get(input.request_id);
+  if (pending && pending.provider === "opencode") {
+    clearTimeout(pending.timer);
+    state.pending.delete(input.request_id);
+    pending.resolve({ behavior: "unchanged" });
+    publish(state);
+  }
+  return sendJson(response, 200, { ok: true });
 }
 
 function resolveClaudeQuestion(response: ServerResponse, input: ClaudeQuestionHookInput, state: BridgeState): void {
@@ -294,7 +383,7 @@ const notificationHeadings: Record<PendingItem["kind"], string> = {
 /** Sends one desktop notification per new item; a session's newer item replaces its older one. */
 function announce(state: BridgeState, item: PendingItem | undefined, cwd: string | undefined, sessionTitle: string | undefined): void {
   if (!item || !state.notify || !state.desktopNotifications) return;
-  const agent = item.provider === "codex" ? "Codex" : "Claude";
+  const agent = providerLabels[providerOf(item)].agent;
   const name = sessionTitle || (cwd ? basename(cwd) || cwd : undefined);
   try {
     state.notify({
@@ -323,11 +412,21 @@ function authorised(request: IncomingMessage, state: BridgeState): boolean {
   return request.headers["x-agent-fold-token"] === state.token;
 }
 
-async function receivePermission(response: ServerResponse, input: ClaudePermissionHookInput, provider: "claude" | "codex", state: BridgeState): Promise<void> {
+async function receivePermission(response: ServerResponse, input: ClaudePermissionHookInput, provider: Provider, state: BridgeState): Promise<void> {
   if (!isClaudePermissionInput(input)) throw new Error("invalid Claude PermissionRequest payload");
   // A new request means the agent is working again in this session.
   clearAttention(state, input.session_id);
-  const id = ApprovalRequestId(randomUUID());
+  // OpenCode ids let its plugin clear the item when the TUI answers first.
+  const id = ApprovalRequestId(provider === "opencode" && typeof input.request_id === "string" && input.request_id.length > 0
+    ? input.request_id
+    : randomUUID());
+  const previous = state.pending.get(id);
+  if (previous) {
+    // The same request delivered twice: the newer connection owns it.
+    clearTimeout(previous.timer);
+    state.pending.delete(id);
+    previous.resolve({ behavior: "unchanged" });
+  }
   const item: PendingItem = {
     id, threadId: ThreadId(input.session_id), provider, kind: "permission",
     summary: describeTool(input.tool_name, input.tool_input), createdAt: new Date().toISOString(),
@@ -365,7 +464,7 @@ function respond(response: ServerResponse, input: PendingResponseInput, state: B
   const question = state.questions.get(input.requestId);
   if (question && question.item.threadId === input.threadId) {
     if (question.answerSurface !== "topbar" || !question.resolve) {
-      return sendJson(response, 409, { error: "this question must be answered in Claude CLI" });
+      return sendJson(response, 409, { error: `this question must be answered in ${providerLabels[question.provider].agent}` });
     }
     if (!input.answers || typeof input.answers !== "object") return sendJson(response, 400, { error: "a question answer is required" });
     const answers = normalizeAnswers(question.item.questions ?? [], input.answers);
@@ -400,11 +499,11 @@ function snapshot(state: BridgeState): PendingResponse {
     threads.set(item.threadId, sessionTitle ? { ...thread, sessionTitle } : thread);
   };
   for (const { item, hookInput, provider } of state.pending.values()) {
-    add(item, provider === "codex" ? "Codex" : "Claude Code", hookInput.cwd, hookInput.session_title);
+    add(item, providerLabels[provider].thread, hookInput.cwd, hookInput.session_title);
   }
-  for (const { item, input } of state.questions.values()) add(item, "Claude Code", input.cwd, input.session_title);
+  for (const { item, provider, input } of state.questions.values()) add(item, providerLabels[provider].thread, input.cwd, input.session_title);
   for (const { item, cwd, sessionTitle } of state.attention.values()) {
-    add(item, item.provider === "codex" ? "Codex" : "Claude Code", cwd, sessionTitle);
+    add(item, providerLabels[providerOf(item)].thread, cwd, sessionTitle);
   }
   return { totalCount: state.pending.size + state.questions.size + state.attention.size, threads: [...threads.values()] };
 }

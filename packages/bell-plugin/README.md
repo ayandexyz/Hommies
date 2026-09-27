@@ -9,17 +9,20 @@ runs the daemon this plugin talks to.
 | --- | --- |
 | `manifest.json` | Plugin contract: kinds, entry points, namespace. |
 | `BarWidget.qml` | The bell glyph in the bar. Counts pending items, opens the panel on click. |
-| `Panel.qml` | Lists pending items by provider and renders Claude's structured question controls. |
+| `Panel.qml` | Lists pending items by provider and renders Claude's and OpenCode's structured question controls. |
 | `Service.qml` | Headless singleton that owns the bridge daemon process. |
 | `bridge.js` | JS module loaded by the QML files. Talks to the bridge over `127.0.0.1`. |
 
-## Claude answer surface
+## Answer surface
 
-The widget setting **Answer Claude questions in** controls question ownership:
+The widget setting **Answer agent questions in** controls question ownership:
 
 - **Top bar** keeps the PreToolUse hook open and returns the selected options to Claude.
-- **Claude CLI** lets Claude render its native prompt while the top bar shows a read-only
-  structured mirror. PostToolUse clears the mirror after the CLI answer.
+  OpenCode questions show in both the bar and OpenCode's TUI; whichever answers first
+  wins, and the other one clears.
+- **Claude CLI** (the stored value keeps its original name) lets the agent render its
+  native prompt while the top bar shows a read-only structured mirror, which clears
+  once the question is answered.
 
 ## Local development
 

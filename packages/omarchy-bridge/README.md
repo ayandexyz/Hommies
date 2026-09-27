@@ -24,7 +24,7 @@ The server binds to `127.0.0.1` only. Routes:
 | `GET` | `/v1/pending` | Pending questions + permissions across all threads, grouped by thread. |
 | `GET` | `/v1/stream` | SSE: emits deltas as the projection changes. |
 | `POST` | `/v1/respond` | Dispatch a user response to an open question or permission request, or dismiss an `attention` item. |
-| `POST` | `/v1/preferences` | Select whether the top bar or Claude CLI owns question answers, and toggle desktop notifications. |
+| `POST` | `/v1/preferences` | Select whether the top bar or the agent's CLI owns question answers, and toggle desktop notifications. |
 | `GET` | `/healthz` | Liveness probe. |
 
 The HTTP surface is the contract with the QML plugin; do not break it without a
@@ -99,8 +99,8 @@ never block Claude.
 
 `agent-fold-bridge` sends a desktop notification (via `notify-send`) for every
 new item: permission requests (critical urgency), questions and waiting replies
-(normal), and finished turns (low). The title names the session by its Claude
-title or project folder, and a session's newer notification replaces its older
+(normal), and finished turns (low). The title names the session by the agent's
+session title or project folder, and a session's newer notification replaces its older
 one instead of stacking. Turn them off with the plugin's **Notify** toggle
 (`POST /v1/preferences` with `{"desktopNotifications": false}`), or start the
 bridge with `--no-notify`. Library callers opt in by passing
@@ -136,3 +136,41 @@ groups:
 Review and trust the hooks from Codex's `/hooks` screen before testing them.
 If the bridge is unavailable, the adapter exits without a decision and Codex
 keeps its native approval prompt; turn hooks never write to stdout.
+
+## OpenCode integration
+
+OpenCode has no command hooks, so agent-fold ships an OpenCode server plugin,
+`dist/opencode-plugin.js`. It runs inside OpenCode and gives OpenCode the same
+features as Claude Code:
+
+- **Permissions** (`permission.asked`): Accept replies `once`, Decline replies
+  `reject`, Cancel leaves the prompt to OpenCode.
+- **Questions** from OpenCode's `question` tool, including multi-select and
+  typed answers.
+- **Turn ends** (`session.idle`): plain-text questions become `attention`
+  items and anything else becomes `finished`, using the same classifier as the
+  `Stop` hooks. Items clear when you send a message, delete the session, or
+  interrupt the turn with Esc.
+- **Session names** from OpenCode's generated session title.
+- **Desktop notifications**.
+
+OpenCode keeps showing its own prompt while the bar shows the request, and
+whichever one you answer first wins. If you answer in OpenCode's TUI, the bar
+item clears. Subagent (`task`) sessions are listed under the conversation that
+started them, and a subagent finishing is not reported as a finished turn. In
+**Claude CLI** answer mode, questions are mirrored read-only, as they are for
+Claude.
+
+Register the plugin in `~/.config/opencode/opencode.json`, keeping any
+plugins you already have:
+
+```json
+{
+  "plugin": ["file:///absolute/path/to/@agent-fold/bridge/dist/opencode-plugin.js"]
+}
+```
+
+Restart OpenCode after changing the config. The plugin answers OpenCode through
+the in-process client it is given, and it reaches the bridge only through
+`port.json` on loopback. If the bridge is not running, the plugin does nothing,
+and OpenCode behaves as it would without it.

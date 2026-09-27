@@ -8,10 +8,10 @@ import "bridge.js" as Bridge
  * agent-fold panel.
  *
  * Opened by BarWidget.qml on click. Lists pending questions and permissions
- * grouped by thread. Claude questions retain their native headers, options,
+ * grouped by thread. Claude and OpenCode questions retain their headers, options,
  * descriptions, and multi-select behavior. The configured answer surface
  * decides whether controls here are interactive or mirror the CLI prompt.
- * `attention` items are notify-only: Claude ended its turn with a plain-text
+ * `attention` items are notify-only: the agent ended its turn with a plain-text
  * question, so the reply happens in the terminal and the bar can only dismiss.
  * `finished` items mark a session whose turn ended without a question. They
  * count toward the bell like other items but render as "Done".
@@ -148,8 +148,12 @@ Panel {
 
   onSelectedProviderChanged: selectedThreadId = ""
 
+  function providerName(provider) {
+    return provider === "codex" ? "Codex" : provider === "opencode" ? "OpenCode" : "Claude"
+  }
+
   function agentName(item) {
-    return item && item.provider === "codex" ? "Codex" : "Claude"
+    return providerName(item ? item.provider : "")
   }
 
   function sessionProject(thread) {
@@ -160,7 +164,7 @@ Panel {
     return separator >= 0 ? title.slice(separator + 3) : title
   }
 
-  // Claude's /resume title names the session; the folder is the fallback,
+  // The agent's own session title names the session; the folder is the fallback,
   // with a short id so two untitled sessions in one folder stay distinct.
   function sessionLabel(thread) {
     if (thread.sessionTitle) return String(thread.sessionTitle)
@@ -325,7 +329,7 @@ Panel {
 
             Text {
               anchors.verticalCenter: parent.verticalCenter
-              text: root.questionsAnsweredInTopbar ? "Answer: Top bar" : "Answer: Claude CLI"
+              text: root.questionsAnsweredInTopbar ? "Answer: Top bar" : "Answer: Agent CLI"
               color: root.barForeground
               opacity: 0.72
               font.family: root.bar ? root.bar.fontFamily : Style.font.family
@@ -367,7 +371,7 @@ Panel {
           width: parent.width
           spacing: Style.space(8)
 
-          readonly property real tabWidth: (width - spacing) / 2
+          readonly property real tabWidth: (width - spacing * 2) / 3
 
           ProviderTab {
             width: providerTabs.tabWidth
@@ -394,6 +398,19 @@ Panel {
             fontSize: Style.font.body
             onClicked: { root.selectedProvider = "codex"; root.selectedThreadId = "" }
           }
+
+          ProviderTab {
+            width: providerTabs.tabWidth
+            providerId: "opencode"
+            providerName: "OpenCode"
+            pendingCount: root.providerCount("opencode")
+            selected: root.selectedProvider === "opencode"
+            bordered: true
+            foreground: root.barForeground
+            fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+            fontSize: Style.font.body
+            onClicked: { root.selectedProvider = "opencode"; root.selectedThreadId = "" }
+          }
         }
 
         Text {
@@ -401,7 +418,7 @@ Panel {
           width: parent.width
           topPadding: Style.space(12)
           bottomPadding: Style.space(12)
-          text: "No pending " + (root.selectedProvider === "claude" ? "Claude" : "Codex") + " items"
+          text: "No pending " + root.providerName(root.selectedProvider) + " items"
           color: root.barForeground
           opacity: 0.65
           font.family: root.bar ? root.bar.fontFamily : Style.font.family
@@ -672,7 +689,7 @@ Panel {
                   visible: itemDelegate.itemData.kind === "question"
                     && itemDelegate.questions.length === 0
                   width: parent.width
-                  text: itemDelegate.itemData.summary || "Claude needs your input"
+                  text: itemDelegate.itemData.summary || (root.agentName(itemDelegate.itemData) + " needs your input")
                   textFormat: Text.PlainText
                   color: root.barForeground
                   font.family: root.bar ? root.bar.fontFamily : Style.font.family
@@ -686,7 +703,7 @@ Panel {
                     ? (itemDelegate.questions.length > 0
                         ? "Select or type an answer for every question"
                         : "This question has no structured input")
-                    : "Answer this question in Claude CLI"
+                    : "Answer this question in " + root.agentName(itemDelegate.itemData)
                   color: root.barForeground
                   opacity: 0.65
                   font.family: root.bar ? root.bar.fontFamily : Style.font.family
