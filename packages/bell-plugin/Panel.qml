@@ -470,6 +470,15 @@ Panel {
                 readonly property var questions: itemData.kind === "question" && itemData.questions
                   ? itemData.questions : []
                 readonly property bool answerInTopbar: itemData.answerSurface !== "cli"
+                // Multi-question prompts page one question at a time so a long
+                // list never pushes the panel off screen.
+                property int questionPage: 0
+                readonly property int currentQuestion: Math.max(0,
+                  Math.min(questionPage, questions.length - 1))
+
+                function showQuestion(index) {
+                  questionPage = Math.max(0, Math.min(index, questions.length - 1))
+                }
 
                 function answerFor(questionId) {
                   return draftAnswers[questionId]
@@ -493,6 +502,7 @@ Panel {
                     next[question.id] = label
                   }
                   draftAnswers = next
+                  if (!question.multiSelect) showQuestion(currentQuestion + 1)
                 }
 
                 function setCustomAnswer(questionId, answer) {
@@ -582,12 +592,56 @@ Panel {
                   }
                 }
 
+                Item {
+                  id: questionPager
+                  visible: itemDelegate.questions.length > 1
+                  width: parent.width
+                  height: visible ? Style.space(28) : 0
+
+                  Button {
+                    id: previousQuestion
+                    anchors.left: parent.left
+                    width: Style.space(40)
+                    height: parent.height
+                    text: "‹"
+                    bordered: true
+                    foreground: root.barForeground
+                    fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+                    fontSize: Style.font.body
+                    opacity: itemDelegate.currentQuestion > 0 ? 1 : 0.35
+                    onClicked: itemDelegate.showQuestion(itemDelegate.currentQuestion - 1)
+                  }
+
+                  Text {
+                    anchors.centerIn: parent
+                    text: (itemDelegate.currentQuestion + 1) + " / " + itemDelegate.questions.length
+                    color: root.barForeground
+                    font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                    font.pixelSize: Style.font.body
+                    font.bold: true
+                  }
+
+                  Button {
+                    anchors.right: parent.right
+                    width: previousQuestion.width
+                    height: parent.height
+                    text: "›"
+                    bordered: true
+                    foreground: root.barForeground
+                    fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+                    fontSize: Style.font.body
+                    opacity: itemDelegate.currentQuestion < itemDelegate.questions.length - 1 ? 1 : 0.35
+                    onClicked: itemDelegate.showQuestion(itemDelegate.currentQuestion + 1)
+                  }
+                }
+
                 Repeater {
                   model: itemDelegate.questions
 
                   delegate: Column {
                     id: questionColumn
                     property var questionData: modelData
+                    visible: index === itemDelegate.currentQuestion
                     width: itemColumn.width
                     spacing: Style.space(4)
 
