@@ -3,12 +3,9 @@ import Quickshell
 import Quickshell.Io
 import "bridge.js" as Bridge
 
-// Headless singleton owned by the Omarchy shell. Spawns the bridge daemon,
-// and hosts the floating character (FloatingBuddy.qml) that replaces the bar
-// bell: it polls the bridge, keeps the answer-surface/notification/sound
-// preferences, and is the `hostWidget` that FloatingPanel.qml reads from.
-// Keep this as an Item: a file named Service.qml cannot instantiate Service
-// or it recursively instantiates itself.
+// Headless singleton owned by the Omarchy shell. Spawns the bridge daemon;
+// BarWidget reads <dataDir>/port.json via FileView to configure bridge.js. Keep this as an Item: a file named
+// Service.qml cannot instantiate Service or it recursively instantiates itself.
 Item {
   id: root
 
@@ -180,86 +177,5 @@ Item {
     interval: 3000
     repeat: false
     onTriggered: bridgeProcess.running = true
-  }
-
-  // The daemon rewrites port.json on every start; reconfigure the client
-  // each time it changes. It takes effect once the port matches the child's.
-  FileView {
-    path: root.dataDir + "/port.json"
-    watchChanges: true
-    printErrors: false
-    onFileChanged: reload()
-    onLoaded: {
-      try {
-        Bridge.configure(JSON.parse(text()))
-        root.syncPreferences()
-        root.refreshSnapshot()
-      } catch (error) {
-        console.warn("hommies connection file invalid:", error)
-      }
-    }
-  }
-
-  FileView {
-    id: prefsFile
-    path: root.dataDir + "/floating.json"
-    printErrors: false
-    onLoaded: {
-      try {
-        var parsed = JSON.parse(text())
-        if (parsed && typeof parsed === "object") root.prefs = parsed
-      } catch (_) {}
-      root.prefsLoaded = true
-      root.syncPreferences()
-    }
-    onLoadFailed: legacyPrefsFile.path = root.legacyDataDir + "/floating.json"
-  }
-
-  // No floating.json in the Hommies folder yet: load the one saved before the
-  // rename, if any, and save it under the new folder.
-  FileView {
-    id: legacyPrefsFile
-    path: ""
-    printErrors: false
-    onLoaded: {
-      try {
-        var parsed = JSON.parse(text())
-        if (parsed && typeof parsed === "object") {
-          root.prefs = parsed
-          prefsFile.setText(JSON.stringify(parsed, null, 2) + "\n")
-        }
-      } catch (_) {}
-      root.prefsLoaded = true
-      root.syncPreferences()
-    }
-    onLoadFailed: {
-      root.prefsLoaded = true
-      root.syncPreferences()
-    }
-  }
-
-  Timer {
-    interval: 3000
-    running: true
-    repeat: true
-    triggeredOnStart: true
-    onTriggered: root.refreshSnapshot()
-  }
-
-  // --- floating UI -----------------------------------------------------------
-
-  Loader {
-    id: panelLoader
-    Component.onCompleted: setSource(Qt.resolvedUrl("FloatingPanel.qml"), { hostWidget: root })
-  }
-
-  LazyLoader {
-    active: root.screen !== null && panelLoader.item !== null
-
-    FloatingBuddy {
-      screen: root.screen
-      host: root
-      panel: panelLoader.item
-    }
   }
 }
