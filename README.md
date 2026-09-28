@@ -45,8 +45,8 @@ This is a pnpm workspace with two packages:
 
 | Path | What it is |
 | --- | --- |
-| `packages/omarchy-bridge/` | A TypeScript npm package: the loopback HTTP bridge (`/v1/pending`, `/v1/respond`, `/v1/focus`, the provider routes, ...), the agent hooks, the OpenCode plugin, and the `hommies` setup CLI. Published to npm as `@thisisayande/hommies`. |
-| `packages/bell-plugin/` | The Omarchy plugin itself: `manifest.json`, `Service.qml` (starts the bridge and hosts Hommie), `FloatingBuddy.qml` and `FloatingPanel.qml` (the floating character and its card), `characters/Hommie.qml`, the bar bell (`BarWidget.qml`, `Panel.qml`), and `bridge.js`, which talks to the bridge over HTTP. Distributed as a folder consumable by `omarchy plugin add`. |
+| `packages/omarchy-bridge/` | A TypeScript npm package. Runs the Effect-based projection pipeline and provider adapters locally and exposes a localhost HTTP surface (`GET /v1/pending`, `POST /v1/respond`, `GET /v1/stream`). Published to npm as `@agent-fold/bridge`. |
+| `packages/bell-plugin/` | The Omarchy plugin itself: `manifest.json`, `BarWidget.qml`, `Panel.qml`, `bridge.mjs`. The QML plugin loads `bridge.mjs`, which talks to the bridge daemon over HTTP. Distributed as a folder consumable by `omarchy plugin add`. |
 
 ## Status
 

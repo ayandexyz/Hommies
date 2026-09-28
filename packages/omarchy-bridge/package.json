@@ -66,6 +66,7 @@
   "dependencies": {
     "effect": "3.22.2"
   },
+  "//": "Provider hook contracts and projection types are declared locally in src/localContracts.ts. Promote them to a published npm package only when another consumer needs them.",
   "devDependencies": {
     "@types/node": "^20.14.0",
     "typescript": "^5.6.3"
