@@ -13,6 +13,7 @@
  * plugin module as a plugin.
  */
 import { postToBridge, readConnection } from "./hook-common.js";
+import { processFields, type ProcessFields } from "./process-tree.js";
 
 interface RequestOptions {
   readonly url: string;
@@ -59,6 +60,8 @@ export const AgentFoldOpenCode = async (input: PluginInput) => {
   const aborted = new Set<string>();
   /** Sessions whose turn failed; their next idle is already reported as the failure. */
   const failed = new Set<string>();
+  /** This plugin runs inside OpenCode, so OpenCode's own ancestry leads to its terminal. */
+  let ownProcess: Promise<ProcessFields> | null = null;
 
   const getSession = async (id: string): Promise<SessionInfo | null> => {
     if (!http) return null;
@@ -87,7 +90,9 @@ export const AgentFoldOpenCode = async (input: PluginInput) => {
   const send = async (path: string, body: unknown, timeoutMs: number): Promise<unknown> => {
     const connection = await readConnection();
     if (connection === null) return null;
-    const response = await postToBridge(connection, path, JSON.stringify(body), timeoutMs);
+    ownProcess ??= processFields(process.pid);
+    const withProcess = body !== null && typeof body === "object" ? { ...body, ...await ownProcess } : body;
+    const response = await postToBridge(connection, path, JSON.stringify(withProcess), timeoutMs);
     return response.ok ? await response.json() as unknown : null;
   };
 

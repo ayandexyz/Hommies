@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /** Command-hook adapter for Claude Code questions, permissions, turn ends, failures, and live activity. */
 import {
-  isActivityEvent, isTurnEvent, postToBridge, readConnection, readStdin, reportActivity, reportFailure, reportTurn,
+  agentProcess, isActivityEvent, isTurnEvent, postToBridge, readConnection, readStdin, reportActivity, reportFailure, reportTurn,
   type ActivityHookEvent, type FailureHookEvent,
 } from "./hook-common.js";
 import { lastAssistantText } from "./stop-detection.js";
@@ -44,7 +44,9 @@ async function main(): Promise<void> {
         : "/v1/providers/claude/permission";
     // Label the session in the bar with the title Claude shows in /resume.
     const sessionTitle = resolvingQuestion ? null : await readSessionTitle(event.transcript_path ?? undefined);
-    const body = sessionTitle === null ? input : JSON.stringify({ ...event, session_title: sessionTitle });
+    const body = resolvingQuestion
+      ? input
+      : JSON.stringify({ ...event, ...(sessionTitle === null ? {} : { session_title: sessionTitle }), ...await agentProcess() });
     const response = await postToBridge(connection, path, body, 5 * 60 * 1000 + 5_000);
     if (response.ok) process.stdout.write(await response.text());
   } catch {

@@ -16,6 +16,11 @@ function respond(input) {
   return request("POST", "/v1/respond", input)
 }
 
+function focus(threadId) {
+  if (!connection) return Promise.reject(new Error("agent-fold bridge is unavailable"))
+  return request("POST", "/v1/focus", { threadId: threadId })
+}
+
 function setPreferences(input) {
   if (!connection) return Promise.resolve({ ok: false })
   return request("POST", "/v1/preferences", input)

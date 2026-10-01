@@ -100,6 +100,12 @@ hook; OpenCode reports through `session.error`.
 
 ## 3. Jump to the agent's terminal
 
+**Status: done.** See "Jump to the terminal" in
+`packages/omarchy-bridge/README.md`. The adapters send the ancestry with every
+request rather than only once, so sessions started before the bridge are
+still focusable. tmux is supported through the attached clients; the window is
+focused by address, with a title match as the tie-breaker.
+
 **Goal:** a "Go to terminal" button on each item and session that focuses the
 exact Hyprland window running the agent.
 

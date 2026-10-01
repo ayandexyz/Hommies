@@ -3,7 +3,12 @@ import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
+import { processFields, type ProcessFields } from "./process-tree.js";
+
 export interface BridgeConnection { readonly port: number; readonly token: string; }
+
+/** The agent (this hook's parent) and its ancestors, so the bar can focus its terminal. */
+export const agentProcess = (): Promise<ProcessFields> => processFields(process.ppid);
 
 /** Fields both agents send on Stop, UserPromptSubmit, and SessionEnd. */
 export interface TurnHookEvent {
@@ -91,7 +96,9 @@ export async function reportTurn(
 ): Promise<void> {
   // stop_hook_active means another Stop hook already kept the agent going.
   if (event.hook_event_name === "Stop" && event.stop_hook_active === true) return;
-  let body: Record<string, unknown> = { hook_event_name: event.hook_event_name, session_id: event.session_id, cwd: event.cwd };
+  let body: Record<string, unknown> = {
+    hook_event_name: event.hook_event_name, session_id: event.session_id, cwd: event.cwd, ...await agentProcess(),
+  };
   if (event.hook_event_name === "UserPromptSubmit" && typeof event.prompt === "string") {
     body = { ...body, prompt: event.prompt.slice(0, 500) };
   }
@@ -126,6 +133,7 @@ export async function reportFailure(
     error: event.error,
     ...(typeof event.error_details === "string" ? { error_details: event.error_details.slice(0, 500) } : {}),
     ...(sessionTitle === null ? {} : { session_title: sessionTitle }),
+    ...await agentProcess(),
   };
   try {
     await postToBridge(connection, `/v1/providers/${provider}/failure`, JSON.stringify(body), 2_000);
@@ -155,6 +163,7 @@ export async function reportActivity(
     session_id: event.session_id,
     cwd: event.cwd,
     ...(typeof event.tool_name === "string" ? { tool_name: event.tool_name, tool_input: toolInput } : {}),
+    ...await agentProcess(),
   };
   try {
     await postToBridge(connection, `/v1/providers/${provider}/activity`, JSON.stringify(body), 1_000);

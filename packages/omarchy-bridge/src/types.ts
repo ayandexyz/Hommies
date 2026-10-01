@@ -1,4 +1,5 @@
 import type { ApprovalRequestId, ProviderDriverKind, ThreadId } from "./localContracts.js";
+import type { FocusWindow } from "./focus.js";
 import type { BridgeNotifier } from "./notifier.js";
 
 /**
@@ -20,6 +21,24 @@ export interface BridgeServerOptions {
    * enabled. `runtime.ts` passes a `notify-send` notifier; omit it to disable.
    */
   readonly notify?: BridgeNotifier;
+  /** Focuses a session's terminal for `POST /v1/focus`. Defaults to `hyprctl`; tests pass a stub. */
+  readonly focusWindow?: FocusWindow;
+}
+
+/**
+ * Optional fields every adapter request may carry so `POST /v1/focus` can find
+ * the agent's terminal: the agent process and its ancestors (nearest first),
+ * and the tmux pane when the agent runs inside tmux.
+ */
+export interface AgentProcessFields {
+  readonly pids?: ReadonlyArray<number>;
+  readonly tmux_pane?: string;
+  readonly tmux_socket?: string;
+}
+
+/** Body for `POST /v1/focus`. */
+export interface FocusInput {
+  readonly threadId: ThreadId;
 }
 
 /**
@@ -116,6 +135,8 @@ export interface SessionActivity {
   /** Basename of the session's working directory. */
   readonly project?: string;
   readonly updatedAt: string;
+  /** True when the adapter sent the agent's process ancestry, so `POST /v1/focus` can try it. */
+  readonly focusable?: boolean;
 }
 
 /**
@@ -138,7 +159,7 @@ export interface BridgePreferencesInput {
 }
 
 /** Payload sent by Claude Code's PermissionRequest hook. */
-export interface ClaudePermissionHookInput {
+export interface ClaudePermissionHookInput extends AgentProcessFields {
   readonly session_id: string;
   readonly transcript_path?: string;
   readonly cwd: string;
@@ -160,7 +181,7 @@ export interface ClaudePermissionHookInput {
  * A question from OpenCode's or Omacode's `question` tool, as sent by the
  * OpenCode plugin or Omacode's built-in agent-fold integration.
  */
-export interface OpenCodeQuestionInput {
+export interface OpenCodeQuestionInput extends AgentProcessFields {
   readonly session_id: string;
   readonly cwd?: string;
   readonly session_title?: string;
@@ -186,7 +207,7 @@ export interface OpenCodeResolvedInput {
  * `last_assistant_message` from the transcript when the agent does not
  * supply it.
  */
-export interface ClaudeTurnHookInput {
+export interface ClaudeTurnHookInput extends AgentProcessFields {
   readonly session_id: string;
   readonly cwd?: string;
   readonly hook_event_name: "Stop" | "UserPromptSubmit" | "SessionEnd";
@@ -203,7 +224,7 @@ export interface ClaudeTurnHookInput {
  * `authentication_failed`, `server_error`, `max_output_tokens`, ...); unknown
  * values are shown as a generic failure.
  */
-export interface FailureHookInput {
+export interface FailureHookInput extends AgentProcessFields {
   readonly session_id: string;
   readonly cwd?: string;
   readonly session_title?: string;
@@ -217,7 +238,7 @@ export interface FailureHookInput {
  * answers right away and never returns a hook decision. Adapters send only
  * the short string fields of `tool_input` the step label needs.
  */
-export interface ActivityHookInput {
+export interface ActivityHookInput extends AgentProcessFields {
   readonly session_id: string;
   readonly cwd?: string;
   readonly session_title?: string;

@@ -21,6 +21,7 @@ by agent, with a click-through to the thread.
   next to the bell means an agent is busy.
 - **Errors and rate limits**: a turn that stopped on an API error or a usage limit shows
   in red or orange, so you know the agent is stuck rather than done.
+- **Go to terminal**: focus the exact Hyprland window (and tmux pane) a session runs in.
 - **Desktop notifications** for new items, with a toggle in the panel.
 
 `agent-fold setup` registers the hooks for every agent it finds. See

@@ -26,6 +26,7 @@ The server binds to `127.0.0.1` only. Routes:
 | `POST` | `/v1/respond` | Dispatch a user response to an open question or permission request, or dismiss an `attention` item. |
 | `POST` | `/v1/providers/{provider}/failure` | Notify-only: a turn ended on an API error or a usage limit (see [Errors and rate limits](#errors-and-rate-limits)). |
 | `POST` | `/v1/providers/{provider}/activity` | Notify-only: a session started, ran a tool, or a tool failed (see [Live activity](#live-activity)). |
+| `POST` | `/v1/focus` | Focus the Hyprland window a session runs in (see [Jump to the terminal](#jump-to-the-terminal)). |
 | `POST` | `/v1/preferences` | Select whether the top bar or the agent's CLI owns question answers, and toggle desktop notifications. |
 | `GET` | `/healthz` | Liveness probe. |
 
@@ -220,6 +221,29 @@ Adapters post to `/v1/providers/{provider}/failure`:
 ```
 
 Older plugin copies ignore `failure` and show these as plain attention items.
+
+## Jump to the terminal
+
+Opening a session in the panel shows **Go to terminal**, which focuses the
+Hyprland window the agent runs in. Every adapter request carries the agent's
+process ancestry, read from `/proc`, as `pids` (nearest first), and, inside
+tmux, `tmux_pane` and `tmux_socket` from `$TMUX_PANE` and `$TMUX`.
+
+`POST /v1/focus` with `{ "threadId": "<session id>" }` then:
+
+1. For tmux sessions, selects the pane's window and pane, and adds the
+   ancestry of every tmux client attached to that session.
+2. Reads `hyprctl clients -j` and picks the window owned by the nearest
+   ancestor. When one process owns several windows (kitty single instance,
+   foot server), a window whose title contains the session title or project
+   folder wins.
+3. Runs `hyprctl dispatch focuswindow address:<address>`.
+
+It answers `404` when the session sent no ancestry or no window matched (for
+example an agent over SSH, or a headless `opencode serve`). Sessions the bridge
+can try are marked `"focusable": true` in `sessions`. The pids are validated
+(positive integers, at most 64), the tmux values must look like tmux's own, and
+commands run through `execFile` without a shell.
 
 ## Desktop notifications
 

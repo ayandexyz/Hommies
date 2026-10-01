@@ -6,8 +6,10 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { ApprovalRequestId, ThreadId } from "./localContracts.js";
 import type {
   ActivityHookInput,
+  AgentProcessFields,
   BridgePreferencesInput,
   FailureHookInput,
+  FocusInput,
   BridgeServerOptions,
   ClaudePermissionHookInput,
   ClaudeTurnHookInput,
@@ -23,6 +25,7 @@ import type {
   SessionFailureKind,
 } from "./types.js";
 import { detectReplyRequest, summarizeFinishedTurn } from "./stop-detection.js";
+import { focusHyprlandWindow, validTmux, type FocusWindow } from "./focus.js";
 import type { BridgeNotifier } from "./notifier.js";
 
 const responseTimeoutMs = 5 * 60 * 1000;
@@ -54,6 +57,7 @@ interface BridgeState {
   readonly sessions: Map<string, TrackedSession>;
   readonly streams: Set<ServerResponse>;
   readonly notify: BridgeNotifier | undefined;
+  readonly focusWindow: FocusWindow;
   questionAnswerSurface: QuestionAnswerSurface;
   desktopNotifications: boolean;
 }
@@ -104,6 +108,9 @@ interface TrackedSession {
   cwd: string | undefined;
   sessionTitle: string | undefined;
   updatedAt: string;
+  /** The agent process and its ancestors, nearest first; empty when the adapter did not send them. */
+  pids: number[];
+  tmux: { socket: string; pane: string } | undefined;
   timer?: ReturnType<typeof setTimeout>;
 }
 
@@ -131,6 +138,7 @@ export async function startBridgeServer(
     sessions: new Map(),
     streams: new Set(),
     notify: options.notify,
+    focusWindow: options.focusWindow ?? focusHyprlandWindow,
     questionAnswerSurface: "topbar",
     desktopNotifications: true,
   };
@@ -182,6 +190,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     if (request.method === "GET" && url.pathname === "/v1/pending") return sendJson(response, 200, snapshot(state));
     if (request.method === "GET" && url.pathname === "/v1/stream") return openStream(response, state);
     if (request.method === "POST" && url.pathname === "/v1/respond") return respond(response, await readJson<PendingResponseInput>(request), state);
+    if (request.method === "POST" && url.pathname === "/v1/focus") return await focus(response, await readJson<FocusInput>(request), state);
     if (request.method === "POST" && url.pathname === "/v1/preferences") {
       return updatePreferences(response, await readJson<BridgePreferencesInput>(request), state);
     }
@@ -241,7 +250,7 @@ function receiveStop(response: ServerResponse, input: ClaudeTurnHookInput, provi
   const question = detectReplyRequest(input.last_assistant_message);
   const kind = question === null ? "finished" : "attention";
   const summary = question ?? summarizeFinishedTurn(input.last_assistant_message);
-  trackSession(state, provider, input.session_id, { cwd: input.cwd, sessionTitle: input.session_title, state: "idle" });
+  trackSession(state, provider, input.session_id, { process: input, cwd: input.cwd, sessionTitle: input.session_title, state: "idle" });
   setAttention(state, input.session_id, { provider, kind, summary }, input.cwd, input.session_title);
   return sendJson(response, 200, { ok: true, attention: kind === "attention" });
 }
@@ -298,7 +307,7 @@ function receiveFailure(response: ServerResponse, input: FailureHookInput, provi
   const details = typeof input.error_details === "string" ? oneLine(input.error_details, 160) : "";
   const label = known?.label ?? "Turn failed";
   const summary = details && details !== label ? `${label}: ${details}` : label;
-  trackSession(state, provider, input.session_id, { cwd: input.cwd, sessionTitle: input.session_title, state: kind });
+  trackSession(state, provider, input.session_id, { process: input, cwd: input.cwd, sessionTitle: input.session_title, state: kind });
   setAttention(state, input.session_id, { provider, kind: "attention", summary, failure: kind }, input.cwd, input.session_title);
   return sendJson(response, 200, { ok: true });
 }
@@ -313,7 +322,7 @@ function receiveResume(response: ServerResponse, input: ClaudeTurnHookInput, pro
   else {
     const prompt = typeof input.prompt === "string" ? oneLine(input.prompt, 80) : "";
     trackSession(state, provider, input.session_id, {
-      cwd: input.cwd, sessionTitle: input.session_title, state: "thinking", ...(prompt ? { step: `> ${prompt}` } : {}),
+      process: input, cwd: input.cwd, sessionTitle: input.session_title, state: "thinking", ...(prompt ? { step: `> ${prompt}` } : {}),
     });
   }
   publish(state);
@@ -328,19 +337,19 @@ function receiveActivity(response: ServerResponse, input: ActivityHookInput, pro
   switch (input.hook_event_name) {
     case "SessionStart":
       trackSession(state, provider, input.session_id, {
-        cwd: input.cwd, sessionTitle: input.session_title, state: state.sessions.get(input.session_id)?.state ?? "idle",
+        process: input, cwd: input.cwd, sessionTitle: input.session_title, state: state.sessions.get(input.session_id)?.state ?? "idle",
       });
       break;
     case "PreToolUse":
       // A new tool call means the agent is no longer waiting on a turn-end reply.
       clearAttention(state, input.session_id);
       trackSession(state, provider, input.session_id, {
-        cwd: input.cwd, sessionTitle: input.session_title, state: "working", step: describeStep(tool, toolInput),
+        process: input, cwd: input.cwd, sessionTitle: input.session_title, state: "working", step: describeStep(tool, toolInput),
       });
       break;
     case "PostToolUseFailure":
       trackSession(state, provider, input.session_id, {
-        cwd: input.cwd, sessionTitle: input.session_title, state: "working", step: `${describeStep(tool, toolInput)} (failed)`,
+        process: input, cwd: input.cwd, sessionTitle: input.session_title, state: "working", step: `${describeStep(tool, toolInput)} (failed)`,
       });
       break;
     default:
@@ -355,13 +364,22 @@ interface SessionUpdate {
   readonly sessionTitle?: string | undefined;
   readonly state?: SessionActivityState;
   readonly step?: string;
+  /** The request body; its process fields, when valid, say where the agent runs. */
+  readonly process?: AgentProcessFields;
 }
 
 /** Creates or refreshes a session's activity and restarts its expiry timer. Callers publish. */
 function trackSession(state: BridgeState, provider: Provider, sessionId: string, update: SessionUpdate): void {
   const existing = state.sessions.get(sessionId);
   if (existing) clearTimeout(existing.timer);
-  const session: TrackedSession = existing ?? { provider, state: "idle", steps: [], cwd: undefined, sessionTitle: undefined, updatedAt: "" };
+  const session: TrackedSession = existing ?? {
+    provider, state: "idle", steps: [], cwd: undefined, sessionTitle: undefined, updatedAt: "", pids: [], tmux: undefined,
+  };
+  const pids = validPids(update.process?.pids);
+  if (pids.length > 0) {
+    session.pids = pids;
+    session.tmux = validTmux(update.process?.tmux_socket, update.process?.tmux_pane);
+  }
   if (typeof update.cwd === "string" && update.cwd.length > 0) session.cwd = update.cwd;
   if (typeof update.sessionTitle === "string" && update.sessionTitle.length > 0) session.sessionTitle = update.sessionTitle;
   if (update.state !== undefined) session.state = update.state;
@@ -402,7 +420,7 @@ async function receiveQuestion(response: ServerResponse, input: ClaudeQuestionHo
   if (input.hook_event_name === "PreToolUse" && input.tool_name === "AskUserQuestion") {
     // A new tool call means the agent is working again in this session.
     clearAttention(state, input.session_id);
-    trackSession(state, provider, input.session_id, { cwd: input.cwd, sessionTitle: input.session_title });
+    trackSession(state, provider, input.session_id, { process: input, cwd: input.cwd, sessionTitle: input.session_title });
     const id = ApprovalRequestId(questionKey(input.session_id, input.tool_use_id));
     const questions = parseQuestions(input.tool_input);
     const item: PendingItem = {
@@ -462,6 +480,9 @@ function openCodeQuestionInput(input: OpenCodeQuestionInput): ClaudeQuestionHook
     session_id: input.session_id,
     ...(typeof input.cwd === "string" ? { cwd: input.cwd } : {}),
     ...(typeof input.session_title === "string" ? { session_title: input.session_title } : {}),
+    ...(input.pids === undefined ? {} : { pids: input.pids }),
+    ...(input.tmux_pane === undefined ? {} : { tmux_pane: input.tmux_pane }),
+    ...(input.tmux_socket === undefined ? {} : { tmux_socket: input.tmux_socket }),
     hook_event_name: "PreToolUse",
     tool_name: "AskUserQuestion",
     tool_use_id: input.request_id,
@@ -527,6 +548,22 @@ function resolveClaudeQuestion(response: ServerResponse, input: ClaudeQuestionHo
     publish(state);
   }
   return sendJson(response, 200, { ok: true });
+}
+
+/** Pids from an adapter: positive integers above init, at most 64. */
+function validPids(value: unknown): number[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((pid): pid is number => Number.isInteger(pid) && pid > 1).slice(0, 64);
+}
+
+/** Focuses the terminal window a session runs in. */
+async function focus(response: ServerResponse, input: FocusInput, state: BridgeState): Promise<void> {
+  if (!input || typeof input.threadId !== "string") throw new Error("threadId is required");
+  const session = state.sessions.get(input.threadId);
+  if (!session || session.pids.length === 0) return sendJson(response, 404, { error: "no terminal is known for this session" });
+  const hints = [session.sessionTitle, session.cwd ? basename(session.cwd) : undefined].filter((hint): hint is string => !!hint);
+  const focused = await state.focusWindow({ pids: session.pids, ...(session.tmux ? { tmux: session.tmux } : {}), hints });
+  return focused ? sendJson(response, 200, { ok: true }) : sendJson(response, 404, { error: "the terminal window was not found" });
 }
 
 function updatePreferences(response: ServerResponse, input: BridgePreferencesInput, state: BridgeState): void {
@@ -596,7 +633,7 @@ async function receivePermission(response: ServerResponse, input: ClaudePermissi
   if (!isClaudePermissionInput(input)) throw new Error("invalid Claude PermissionRequest payload");
   // A new request means the agent is working again in this session.
   clearAttention(state, input.session_id);
-  trackSession(state, provider, input.session_id, { cwd: input.cwd, sessionTitle: input.session_title });
+  trackSession(state, provider, input.session_id, { process: input, cwd: input.cwd, sessionTitle: input.session_title });
   // OpenCode and Omacode ids let their integrations clear the item when the TUI answers first.
   const id = ApprovalRequestId(hasRequestIds(provider) && typeof input.request_id === "string" && input.request_id.length > 0
     ? input.request_id
@@ -705,12 +742,13 @@ function sessionsSnapshot(state: BridgeState): SessionActivity[] {
         ...(session.sessionTitle ? { sessionTitle: session.sessionTitle } : {}),
         ...(project ? { project } : {}),
         updatedAt: session.updatedAt,
+        ...(session.pids.length > 0 ? { focusable: true } : {}),
       };
     })
     .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
 }
 
-interface ClaudeQuestionHookInput {
+interface ClaudeQuestionHookInput extends AgentProcessFields {
   readonly session_id: string;
   readonly cwd?: string;
   readonly hook_event_name: "PreToolUse" | "PostToolUse" | "PostToolUseFailure";

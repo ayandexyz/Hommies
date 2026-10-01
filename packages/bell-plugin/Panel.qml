@@ -19,6 +19,8 @@ import "bridge.js" as Bridge
  * latest steps, even when nothing needs an answer (`snapshot.sessions`).
  * An `attention` item with `failure` set means the turn stopped on an API
  * error or a rate limit; it renders red or orange and is dismissed the same way.
+ * "Go to terminal" focuses the Hyprland window the session runs in, when the
+ * adapter sent the agent's process ancestry (`activity.focusable`).
  *
  * Each provider tab first lists its sessions (one row per thread); clicking a
  * row opens that session's items and the back row returns to the list.
@@ -368,6 +370,14 @@ Panel {
   function close() {
     root.controller.hide()
   }
+  function focusTerminal(thread) {
+    Bridge.focus(thread.threadId).then(function() {
+      root.close()
+    }).catch(function(error) {
+      console.warn("agent-fold could not focus the terminal:", error)
+    })
+  }
+
   function switchPanel(direction) {
     if (root.bar && typeof root.bar.switchPanelFrom === "function") {
       return root.bar.switchPanelFrom(root.hostWidget || root, direction)
@@ -554,6 +564,16 @@ Panel {
               fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
               fontSize: Style.font.body
               onClicked: root.selectedThreadId = ""
+            }
+            Button {
+              visible: threadColumn.threadData.activity ? threadColumn.threadData.activity.focusable === true : false
+              width: parent.width
+              text: "Go to terminal"
+              bordered: true
+              foreground: root.barForeground
+              fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+              fontSize: Style.font.bodySmall
+              onClicked: root.focusTerminal(threadColumn.threadData)
             }
             Column {
               visible: root.recentSteps(threadColumn.threadData).length > 0

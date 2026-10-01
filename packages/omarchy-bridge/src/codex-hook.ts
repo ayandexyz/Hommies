@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /** Command-hook adapter for Codex permission requests, turn ends, and live activity. */
 import {
-  isActivityEvent, isTurnEvent, postToBridge, readConnection, readStdin, reportActivity, reportTurn, type ActivityHookEvent,
+  agentProcess, isActivityEvent, isTurnEvent, postToBridge, readConnection, readStdin, reportActivity, reportTurn, type ActivityHookEvent,
 } from "./hook-common.js";
 import { lastCodexAssistantText, readCodexSessionTitle } from "./codex-transcript.js";
 import { readTranscriptTail } from "./transcript.js";
@@ -31,7 +31,7 @@ async function main(): Promise<void> {
   try {
     // Label the session in the bar with the name Codex shows in `codex resume`.
     const sessionTitle = await readCodexSessionTitle(event.session_id);
-    const body = sessionTitle === null ? input : JSON.stringify({ ...event, session_title: sessionTitle });
+    const body = JSON.stringify({ ...event, ...(sessionTitle === null ? {} : { session_title: sessionTitle }), ...await agentProcess() });
     const response = await postToBridge(connection, "/v1/providers/codex/permission", body, 5 * 60 * 1000 + 5_000);
     if (response.ok) process.stdout.write(await response.text());
   } catch {
