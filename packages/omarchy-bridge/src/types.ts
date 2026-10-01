@@ -1,6 +1,7 @@
 import type { ApprovalRequestId, ProviderDriverKind, ThreadId } from "./localContracts.js";
 import type { FocusWindow } from "./focus.js";
 import type { BridgeNotifier } from "./notifier.js";
+import type { AgentProcessProbe } from "./process-tree.js";
 import type { BridgeSoundPlayer } from "./sound.js";
 
 /**
@@ -31,6 +32,12 @@ export interface BridgeServerOptions {
   readonly checkHooks?: () => Promise<ReadonlyArray<string>>;
   /** Plays a sound for each new item while the `sounds` preference is on. `runtime.ts` passes `createSoundPlayer()`. */
   readonly playSound?: BridgeSoundPlayer;
+  /**
+   * Finds each session's agent process from the ancestry adapters send, so a
+   * session is dropped as soon as its agent exits (closed mid-turn, killed).
+   * Defaults to reading `/proc`; tests pass a stub.
+   */
+  readonly agentProcesses?: AgentProcessProbe;
 }
 
 /**

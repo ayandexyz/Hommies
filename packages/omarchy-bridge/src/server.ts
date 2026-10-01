@@ -27,6 +27,7 @@ import type {
 import { detectReplyRequest, summarizeFinishedTurn } from "./stop-detection.js";
 import { isValidAgentName } from "./agent-name.js";
 import { focusHyprlandWindow, validTmux, type FocusWindow } from "./focus.js";
+import { procAgentProbe, type AgentProcessProbe, type ProcessIdentity } from "./process-tree.js";
 import type { BridgeNotifier } from "./notifier.js";
 import type { BridgeSound, BridgeSoundPlayer } from "./sound.js";
 
@@ -39,6 +40,8 @@ const idleSessionTimeoutMs = 30 * 60 * 1000;
 const busySessionTimeoutMs = 3 * 60 * 60 * 1000;
 const maxSessionSteps = 20;
 const hookCheckIntervalMs = 60 * 1000;
+/** How often sessions are checked for an agent process that has exited. */
+const agentExitCheckIntervalMs = 5 * 1000;
 
 interface PendingPermission {
   readonly item: PendingItem;
@@ -68,6 +71,7 @@ interface BridgeState {
   readonly notify: BridgeNotifier | undefined;
   readonly playSound: BridgeSoundPlayer | undefined;
   readonly focusWindow: FocusWindow;
+  readonly agentProcesses: AgentProcessProbe;
   hooksOutdated: ReadonlyArray<string>;
   questionAnswerSurface: QuestionAnswerSurface;
   desktopNotifications: boolean;
@@ -141,6 +145,8 @@ interface TrackedSession {
   /** The agent process and its ancestors, nearest first; empty when the adapter did not send them. */
   pids: number[];
   tmux: { socket: string; pane: string } | undefined;
+  /** The agent process found in `pids`; the session is dropped once it exits. */
+  agent: ProcessIdentity | undefined;
   timer?: ReturnType<typeof setTimeout>;
 }
 
@@ -170,6 +176,7 @@ export async function startBridgeServer(
     notify: options.notify,
     playSound: options.playSound,
     focusWindow: options.focusWindow ?? focusHyprlandWindow,
+    agentProcesses: options.agentProcesses ?? procAgentProbe,
     hooksOutdated: [],
     questionAnswerSurface: "topbar",
     desktopNotifications: true,
@@ -195,6 +202,13 @@ export async function startBridgeServer(
   await refreshHooks();
   const hookTimer = checkHooks ? setInterval(() => { void refreshHooks(); }, hookCheckIntervalMs) : undefined;
   hookTimer?.unref();
+  let checkingExits = false;
+  const exitTimer = setInterval(() => {
+    if (checkingExits) return;
+    checkingExits = true;
+    void dropExitedSessions(state).finally(() => { checkingExits = false; });
+  }, agentExitCheckIntervalMs);
+  exitTimer.unref();
   const address = server.address();
   if (address === null || typeof address === "string") throw new Error("agent-fold bridge did not receive a TCP address");
   await writeFile(
@@ -206,6 +220,7 @@ export async function startBridgeServer(
     port: address.port,
     close: async () => {
       if (hookTimer) clearInterval(hookTimer);
+      clearInterval(exitTimer);
       for (const pending of state.pending.values()) {
         clearTimeout(pending.timer);
         pending.resolve({ behavior: "unchanged" });
@@ -433,12 +448,14 @@ function trackSession(state: BridgeState, provider: Provider, sessionId: string,
   const existing = state.sessions.get(sessionId);
   if (existing) clearTimeout(existing.timer);
   const session: TrackedSession = existing ?? {
-    provider, state: "idle", steps: [], cwd: undefined, sessionTitle: undefined, updatedAt: "", pids: [], tmux: undefined,
+    provider, state: "idle", steps: [], cwd: undefined, sessionTitle: undefined, updatedAt: "", pids: [], tmux: undefined, agent: undefined,
   };
   const pids = validPids(update.process?.pids);
   if (pids.length > 0) {
+    const changed = pids.join(",") !== session.pids.join(",");
     session.pids = pids;
     session.tmux = validTmux(update.process?.tmux_socket, update.process?.tmux_pane);
+    if (changed || session.agent === undefined) identifyAgent(state, sessionId, session, pids);
   }
   if (typeof update.cwd === "string" && update.cwd.length > 0) session.cwd = update.cwd;
   if (typeof update.sessionTitle === "string" && update.sessionTitle.length > 0) session.sessionTitle = update.sessionTitle;
@@ -455,6 +472,43 @@ function trackSession(state: BridgeState, provider: Provider, sessionId: string,
   }, session.state === "working" || session.state === "thinking" ? busySessionTimeoutMs : idleSessionTimeoutMs);
   session.timer = timer;
   state.sessions.set(sessionId, session);
+}
+
+/** Finds the session's agent process in the background; a later ancestry wins over this one. */
+function identifyAgent(state: BridgeState, sessionId: string, session: TrackedSession, pids: number[]): void {
+  void state.agentProcesses.identify(pids).then((agent) => {
+    if (state.sessions.get(sessionId) === session && session.pids === pids) session.agent = agent ?? undefined;
+  }, () => {});
+}
+
+/**
+ * Drops sessions whose agent process has exited, with the requests still
+ * pending for them. Without this, an agent closed mid-turn stays "Thinking"
+ * until the busy timeout because it never sends SessionEnd.
+ */
+async function dropExitedSessions(state: BridgeState): Promise<void> {
+  let changed = false;
+  for (const [sessionId, session] of [...state.sessions]) {
+    const agent = session.agent;
+    if (!agent) continue;
+    const running = await state.agentProcesses.running(agent).catch(() => true);
+    if (running || state.sessions.get(sessionId) !== session || session.agent !== agent) continue;
+    dropSession(state, sessionId);
+    for (const [id, pending] of [...state.pending]) {
+      if (String(pending.item.threadId) !== sessionId) continue;
+      clearTimeout(pending.timer);
+      state.pending.delete(id);
+      pending.resolve({ behavior: "unchanged" });
+    }
+    for (const [id, question] of [...state.questions]) {
+      if (String(question.item.threadId) !== sessionId) continue;
+      clearTimeout(question.timer);
+      state.questions.delete(id);
+      question.resolve?.(null);
+    }
+    changed = true;
+  }
+  if (changed) publish(state);
 }
 
 function dropSession(state: BridgeState, sessionId: string): void {

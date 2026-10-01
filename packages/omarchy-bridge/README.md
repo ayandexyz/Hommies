@@ -168,9 +168,14 @@ busy.
 | `Stop` | idle | — |
 | `SessionEnd` | removed | — |
 
-Sessions keep their last 20 steps in memory. An idle session with no events
-for 30 minutes is dropped (3 hours for a busy one, since one tool call can run
-long), so a crashed agent does not stay listed.
+Sessions keep their last 20 steps in memory. When an adapter sends the
+process ancestry (see [Jump to the terminal](#jump-to-the-terminal)), the
+bridge finds the agent's own process in it, skipping shell wrappers such as
+`sh -c`. It checks that process every 5 seconds. Once the process exits, for
+example because the agent was closed mid-turn, the session is dropped along
+with any permission or question still pending for it. Without an ancestry, an
+idle session with no events for 30 minutes is dropped (3 hours for a busy one,
+since one tool call can run long), so a crashed agent does not stay listed.
 
 The adapters send only the short string fields of `tool_input` the labels use
 (`command`, `file_path`, `path`, `pattern`, `query`, `url`, `description`), never
