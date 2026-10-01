@@ -1,7 +1,7 @@
 # agent-fold
 
 A Omarchy bar plugin that surfaces pending **questions** and **permission requests** from
-coding agents (Claude Code, Codex, OpenCode, Omacode, Cursor, Grok, Antigravity) so you don't miss
+coding agents (Claude Code, Codex, OpenCode, Omacode, or any agent with command hooks) so you don't miss
 them when you're away from the chat UI.
 
 ## Why
@@ -37,24 +37,40 @@ This is a pnpm workspace with two packages:
 
 | Path | What it is |
 | --- | --- |
-| `packages/omarchy-bridge/` | A TypeScript npm package. Embeds a thin slice of the T3 Code orchestration layer and exposes a localhost HTTP surface (`GET /v1/pending`, `POST /v1/respond`, `GET /v1/stream`). Published to npm as `@thisisayande/agent-fold`. |
-| `packages/bell-plugin/` | The Omarchy plugin itself: `manifest.json`, `BarWidget.qml`, `Panel.qml`, `bridge.mjs`. The QML plugin loads `bridge.mjs`, which talks to the bridge daemon over HTTP. Distributed as a folder consumable by `omarchy plugin add`. |
+| `packages/omarchy-bridge/` | A TypeScript npm package: the loopback HTTP bridge (`/v1/pending`, `/v1/respond`, `/v1/focus`, the provider routes, ...), the agent hooks, the OpenCode plugin, and the `agent-fold` setup CLI. Published to npm as `@thisisayande/agent-fold`. |
+| `packages/bell-plugin/` | The Omarchy plugin itself: `manifest.json`, `BarWidget.qml`, `Panel.qml`, `Service.qml`, and `bridge.js`, which talks to the bridge over HTTP. Distributed as a folder consumable by `omarchy plugin add`. |
 
 ## Status
 
-The first vertical slice, Claude Code permission requests, is implemented in
-the bridge: its command hook waits for a response from the local HTTP API and
-returns Claude's documented allow/deny decision. The daemon lifecycle and QML
-client controls are still pending, so this is currently a provider integration
-and API rather than an installable end-to-end plugin.
+Working end to end, not yet published to the plugin marketplace.
+
+- **Bridge** (`@thisisayande/agent-fold`): the HTTP API, the Claude Code and Codex
+  command hooks, the OpenCode plugin, the generic `agent-fold-hook`, desktop
+  notifications, sounds, and `agent-fold setup` are implemented and tested.
+- **Plugin**: the bar widget starts the bridge, restarts it when it exits, and polls
+  `/v1/pending` every 3 seconds. The panel answers permissions and questions and shows
+  live activity, failures, and the jump-to-terminal button.
+- **Omacode** ships its own integration upstream.
+
+Not done yet:
+
+- `GET /v1/stream` (SSE) exists in the bridge, but the plugin still polls.
+- Codex has no failure hook and rejects saved permission rules, so its failed turns
+  are not reported and it gets no **Always** button.
+- Omacode does not report live activity yet.
+- Custom agents' permission requests are not answered from the bar.
+- The bridge keeps everything in memory, so pending items are lost when it restarts.
+
+See [`docs/roadmap.md`](docs/roadmap.md) for what was planned and how it turned out.
 
 ## Layout
 
 ```
 agent-fold/
 ├── packages/
-│   ├── omarchy-bridge/   # TS, Effect-based, embeds ProjectionPipeline + adapters
-│   └── bell-plugin/      # QML + manifest.json, depends on @thisisayande/agent-fold
+│   ├── omarchy-bridge/   # TS bridge, hooks, OpenCode plugin, setup CLI
+│   └── bell-plugin/      # QML + manifest.json; runs agent-fold-bridge
+├── docs/roadmap.md
 ├── pnpm-workspace.yaml
 ├── package.json
 ├── tsconfig.base.json
@@ -62,16 +78,33 @@ agent-fold/
 └── README.md
 ```
 
-## Install (target, not yet working)
+## Install
 
-Once `packages/bell-plugin/` is publishable:
+1. Install the bridge and register the agent hooks:
 
-```sh
-omarchy plugin add <this-repo>#path:packages/bell-plugin --enable
-```
+   ```sh
+   npm install -g @thisisayande/agent-fold
+   agent-fold setup --dry-run   # preview the config changes
+   agent-fold setup
+   ```
 
-The bridge daemon is launched by the plugin on first load and runs in the background as
-a Quickshell `service`-kind singleton.
+   Setup backs up every config it changes. For Codex, approve the new hooks in its
+   `/hooks` screen; restart OpenCode to load its plugin. `agent-fold setup --check`
+   tells you later whether the hooks are still current.
+
+2. Add the plugin to the bar. Until it is on the marketplace, link it from a checkout:
+
+   ```sh
+   ln -s "$PWD/packages/bell-plugin" ~/.config/omarchy/plugins/io.github.ayan-de.agent-fold
+   omarchy-shell shell rescanPlugins
+   ```
+
+   Once published, this becomes
+   `omarchy plugin add <this-repo>#path:packages/bell-plugin --enable`.
+
+The plugin starts the bridge (`agent-fold-bridge`) as a background service and
+restarts it if it exits. After updating the bridge package, run
+`omarchy restart shell` so the running bridge picks up the new code.
 
 ## License
 
