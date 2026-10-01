@@ -57,6 +57,8 @@ export const AgentFoldOpenCode = async (input: PluginInput) => {
   const forwarded = new Set<string>();
   /** Sessions the user interrupted; their next idle is not a finished turn. */
   const aborted = new Set<string>();
+  /** Sessions whose turn failed; their next idle is already reported as the failure. */
+  const failed = new Set<string>();
 
   const getSession = async (id: string): Promise<SessionInfo | null> => {
     if (!http) return null;
@@ -163,6 +165,20 @@ export const AgentFoldOpenCode = async (input: PluginInput) => {
     }, turnTimeoutMs);
   };
 
+  const onFailure = async (sessionId: string, error: Readonly<Record<string, unknown>>): Promise<void> => {
+    const session = await getSession(sessionId);
+    // A subagent failing is reported by the conversation that started it.
+    if (!session || session.parentID) return;
+    failed.add(sessionId);
+    const data = isRecord(error.data) ? error.data : {};
+    await send("/v1/providers/opencode/failure", {
+      ...sessionFields(session),
+      hook_event_name: "StopFailure",
+      error: failureName(error, data),
+      ...(typeof data.message === "string" ? { error_details: data.message.slice(0, 500) } : {}),
+    }, turnTimeoutMs);
+  };
+
   const onIdle = async (sessionId: string): Promise<void> => {
     const session = await getSession(sessionId);
     // Subagents finishing is not the conversation finishing.
@@ -171,6 +187,7 @@ export const AgentFoldOpenCode = async (input: PluginInput) => {
       await resume(sessionId, "UserPromptSubmit");
       return;
     }
+    if (failed.delete(sessionId)) return;
     const message = await lastAssistantText(sessionId);
     if (message === null) return;
     await send("/v1/providers/opencode/stop", {
@@ -200,7 +217,9 @@ export const AgentFoldOpenCode = async (input: PluginInput) => {
       case "session.idle": return sessionId === null ? undefined : onIdle(sessionId);
       case "session.error": {
         const error = properties.error;
-        if (sessionId !== null && isRecord(error) && error.name === "MessageAbortedError") aborted.add(sessionId);
+        if (sessionId === null || !isRecord(error)) return;
+        if (error.name === "MessageAbortedError") aborted.add(sessionId);
+        else return onFailure(sessionId, error);
         return;
       }
       case "session.deleted":
@@ -221,6 +240,7 @@ export const AgentFoldOpenCode = async (input: PluginInput) => {
     },
     "chat.message": async ({ sessionID }: { readonly sessionID: string }): Promise<void> => {
       aborted.delete(sessionID);
+      failed.delete(sessionID);
       void resume(sessionID, "UserPromptSubmit").catch(() => undefined);
     },
     "tool.execute.before": async (
@@ -269,6 +289,18 @@ function stepDetail(args: unknown): Record<string, string> {
   const detail: Record<string, string> = {};
   for (const [key, value] of Object.entries(fields)) if (typeof value === "string") detail[key] = value.slice(0, 300);
   return detail;
+}
+
+/** Maps an OpenCode session error to the bridge's (Claude's) failure names. */
+function failureName(error: Readonly<Record<string, unknown>>, data: Readonly<Record<string, unknown>>): string {
+  if (error.name === "ProviderAuthError") return "authentication_failed";
+  if (error.name === "MessageOutputLengthError") return "max_output_tokens";
+  if (error.name === "APIError") {
+    if (data.statusCode === 429) return "rate_limit";
+    if (data.statusCode === 529) return "overloaded";
+    if (typeof data.statusCode === "number" && data.statusCode >= 500) return "server_error";
+  }
+  return "unknown";
 }
 
 function decisionOf(result: unknown): "allow" | "deny" | null {

@@ -36,10 +36,12 @@ const CLAUDE_HOOKS: ReadonlyArray<HookSpec> = [
   { event: "PostToolUseFailure", matcher: "*", timeout: 5 },
   { event: "PermissionRequest", timeout: 305 },
   { event: "Stop", timeout: 5 },
+  { event: "StopFailure", timeout: 5 },
   { event: "UserPromptSubmit", timeout: 5 },
   { event: "SessionEnd", timeout: 5 },
 ];
 
+/** Codex has no StopFailure hook, so its failed turns are not reported. */
 const CODEX_HOOKS: ReadonlyArray<HookSpec> = [
   { event: "SessionStart", timeout: 5 },
   { event: "PreToolUse", matcher: "*", timeout: 5 },

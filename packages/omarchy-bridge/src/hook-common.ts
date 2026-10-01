@@ -17,6 +17,12 @@ export interface TurnHookEvent {
   readonly prompt?: string;
 }
 
+/** Claude's StopFailure: the turn ended on an API error instead of a reply. */
+export interface FailureHookEvent extends TurnHookEvent {
+  readonly error?: string;
+  readonly error_details?: string;
+}
+
 /** Fields both agents send on SessionStart and the tool hooks. */
 export interface ActivityHookEvent extends TurnHookEvent {
   readonly tool_name?: string;
@@ -102,6 +108,29 @@ export async function reportTurn(
     await postToBridge(connection, path, JSON.stringify(body), 2_000);
   } catch {
     // Notifications are best-effort; never delay the agent's turn.
+  }
+}
+
+/** Reports a failed turn. Notify-only and never writes to stdout. */
+export async function reportFailure(
+  provider: "claude" | "codex",
+  event: FailureHookEvent,
+  connection: BridgeConnection,
+  sessionTitle: string | null,
+): Promise<void> {
+  if (typeof event.error !== "string") return;
+  const body = {
+    hook_event_name: "StopFailure",
+    session_id: event.session_id,
+    cwd: event.cwd,
+    error: event.error,
+    ...(typeof event.error_details === "string" ? { error_details: event.error_details.slice(0, 500) } : {}),
+    ...(sessionTitle === null ? {} : { session_title: sessionTitle }),
+  };
+  try {
+    await postToBridge(connection, `/v1/providers/${provider}/failure`, JSON.stringify(body), 2_000);
+  } catch {
+    // Best-effort, like the other turn hooks.
   }
 }
 

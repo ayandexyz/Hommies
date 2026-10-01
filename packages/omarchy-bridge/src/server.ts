@@ -7,6 +7,7 @@ import { ApprovalRequestId, ThreadId } from "./localContracts.js";
 import type {
   ActivityHookInput,
   BridgePreferencesInput,
+  FailureHookInput,
   BridgeServerOptions,
   ClaudePermissionHookInput,
   ClaudeTurnHookInput,
@@ -19,6 +20,7 @@ import type {
   QuestionAnswerSurface,
   SessionActivity,
   SessionActivityState,
+  SessionFailureKind,
 } from "./types.js";
 import { detectReplyRequest, summarizeFinishedTurn } from "./stop-detection.js";
 import type { BridgeNotifier } from "./notifier.js";
@@ -214,6 +216,10 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       const input = await readJson<ClaudeTurnHookInput>(request);
       return turn[2] === "stop" ? receiveStop(response, input, provider, state) : receiveResume(response, input, provider, state);
     }
+    const failure = /^\/v1\/providers\/(claude|codex|opencode|omacode)\/failure$/.exec(url.pathname);
+    if (request.method === "POST" && failure) {
+      return receiveFailure(response, await readJson<FailureHookInput>(request), failure[1] as Provider, state);
+    }
     const activity = /^\/v1\/providers\/(claude|codex|opencode|omacode)\/activity$/.exec(url.pathname);
     if (request.method === "POST" && activity) {
       return receiveActivity(response, await readJson<ActivityHookInput>(request), activity[1] as Provider, state);
@@ -235,23 +241,66 @@ function receiveStop(response: ServerResponse, input: ClaudeTurnHookInput, provi
   const question = detectReplyRequest(input.last_assistant_message);
   const kind = question === null ? "finished" : "attention";
   const summary = question ?? summarizeFinishedTurn(input.last_assistant_message);
-  clearAttention(state, input.session_id);
   trackSession(state, provider, input.session_id, { cwd: input.cwd, sessionTitle: input.session_title, state: "idle" });
+  setAttention(state, input.session_id, { provider, kind, summary }, input.cwd, input.session_title);
+  return sendJson(response, 200, { ok: true, attention: kind === "attention" });
+}
+
+/** Replaces the session's turn-end item, publishes, and announces it. */
+function setAttention(
+  state: BridgeState,
+  sessionId: string,
+  fields: Pick<PendingItem, "provider" | "kind" | "summary" | "failure">,
+  cwd: string | undefined,
+  sessionTitle: string | undefined,
+): void {
+  clearAttention(state, sessionId);
   const id = ApprovalRequestId(randomUUID());
   const timer = setTimeout(() => {
-    if (state.attention.get(input.session_id)?.item.id !== id) return;
-    state.attention.delete(input.session_id);
+    if (state.attention.get(sessionId)?.item.id !== id) return;
+    state.attention.delete(sessionId);
     publish(state);
   }, attentionTimeoutMs);
-  state.attention.set(input.session_id, {
-    item: { id, threadId: ThreadId(input.session_id), provider, kind, summary, createdAt: new Date().toISOString() },
-    cwd: typeof input.cwd === "string" ? input.cwd : undefined,
-    sessionTitle: typeof input.session_title === "string" && input.session_title.length > 0 ? input.session_title : undefined,
+  const item: PendingItem = { id, threadId: ThreadId(sessionId), ...fields, createdAt: new Date().toISOString() };
+  state.attention.set(sessionId, {
+    item,
+    cwd: typeof cwd === "string" ? cwd : undefined,
+    sessionTitle: typeof sessionTitle === "string" && sessionTitle.length > 0 ? sessionTitle : undefined,
     timer,
   });
   publish(state);
-  announce(state, state.attention.get(input.session_id)?.item, input.cwd, input.session_title);
-  return sendJson(response, 200, { ok: true, attention: kind === "attention" });
+  announce(state, item, cwd, sessionTitle);
+}
+
+/** What each failure means for the user, by Claude's `StopFailure` error name. */
+const failureLabels: Readonly<Record<string, { readonly kind: SessionFailureKind; readonly label: string }>> = {
+  rate_limit: { kind: "ratelimit", label: "Rate limited \u2014 wait and retry" },
+  overloaded: { kind: "ratelimit", label: "API overloaded \u2014 wait and retry" },
+  billing_error: { kind: "error", label: "Billing error \u2014 check your plan or credits" },
+  authentication_failed: { kind: "error", label: "Not signed in \u2014 log in again" },
+  oauth_org_not_allowed: { kind: "error", label: "This organization is not allowed" },
+  account_on_hold: { kind: "error", label: "Account on hold" },
+  verification_required: { kind: "error", label: "Account verification required" },
+  cloud_credential_error: { kind: "error", label: "Cloud credentials failed" },
+  server_error: { kind: "error", label: "API unavailable \u2014 retry" },
+  max_output_tokens: { kind: "error", label: "Hit the output token limit" },
+  model_not_found: { kind: "error", label: "Model not found" },
+  invalid_request: { kind: "error", label: "Request rejected by the API" },
+};
+
+/** The turn ended on an API error or a usage limit, so the agent stopped and needs you. */
+function receiveFailure(response: ServerResponse, input: FailureHookInput, provider: Provider, state: BridgeState): void {
+  if (!input || typeof input.session_id !== "string" || input.session_id.length === 0 || typeof input.error !== "string") {
+    throw new Error("invalid failure payload");
+  }
+  const known = failureLabels[input.error];
+  const kind = known?.kind ?? "error";
+  const details = typeof input.error_details === "string" ? oneLine(input.error_details, 160) : "";
+  const label = known?.label ?? "Turn failed";
+  const summary = details && details !== label ? `${label}: ${details}` : label;
+  trackSession(state, provider, input.session_id, { cwd: input.cwd, sessionTitle: input.session_title, state: kind });
+  setAttention(state, input.session_id, { provider, kind: "attention", summary, failure: kind }, input.cwd, input.session_title);
+  return sendJson(response, 200, { ok: true });
 }
 
 /** The user replied or the session ended, so the agent is no longer waiting. */
@@ -325,7 +374,7 @@ function trackSession(state: BridgeState, provider: Provider, sessionId: string,
     if (state.sessions.get(sessionId)?.timer !== timer) return;
     state.sessions.delete(sessionId);
     publish(state);
-  }, session.state === "idle" ? idleSessionTimeoutMs : busySessionTimeoutMs);
+  }, session.state === "working" || session.state === "thinking" ? busySessionTimeoutMs : idleSessionTimeoutMs);
   session.timer = timer;
   state.sessions.set(sessionId, session);
 }
@@ -506,6 +555,11 @@ const notificationHeadings: Record<PendingItem["kind"], string> = {
   finished: "Finished",
 };
 
+const failureHeadings: Record<SessionFailureKind, string> = {
+  error: "Stopped on an error",
+  ratelimit: "Rate limited",
+};
+
 /** Sends one desktop notification per new item; a session's newer item replaces its older one. */
 function announce(state: BridgeState, item: PendingItem | undefined, cwd: string | undefined, sessionTitle: string | undefined): void {
   if (!item || !state.notify || !state.desktopNotifications) return;
@@ -515,8 +569,8 @@ function announce(state: BridgeState, item: PendingItem | undefined, cwd: string
     state.notify({
       key: item.threadId,
       title: name ? `${agent} · ${name}` : agent,
-      body: `${notificationHeadings[item.kind]}: ${item.summary}`,
-      urgency: item.kind === "finished" ? "low" : item.kind === "permission" ? "critical" : "normal",
+      body: `${item.failure === undefined ? notificationHeadings[item.kind] : failureHeadings[item.failure]}: ${item.summary}`,
+      urgency: item.kind === "finished" ? "low" : item.kind === "permission" || item.failure === "error" ? "critical" : "normal",
     });
   } catch {
     // A broken notifier must not break the hook response.

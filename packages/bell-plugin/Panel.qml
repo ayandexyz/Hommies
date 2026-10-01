@@ -17,6 +17,8 @@ import "bridge.js" as Bridge
  * count toward the bell like other items but render as "Done".
  * Sessions that are thinking or running tools are listed too, with their
  * latest steps, even when nothing needs an answer (`snapshot.sessions`).
+ * An `attention` item with `failure` set means the turn stopped on an API
+ * error or a rate limit; it renders red or orange and is dismissed the same way.
  *
  * Each provider tab first lists its sessions (one row per thread); clicking a
  * row opens that session's items and the back row returns to the list.
@@ -74,6 +76,7 @@ Panel {
     readonly property int pendingCount: root.pendingItemCount(threadData)
     readonly property string activityState: threadData.activity ? String(threadData.activity.state) : ""
     readonly property bool busy: pendingCount === 0 && (activityState === "working" || activityState === "thinking")
+    readonly property string failure: root.threadFailure(threadData)
 
     text: ""
     leftAlign: true
@@ -108,8 +111,11 @@ Panel {
         Text {
           id: sessionCount
           text: sessionRow.busy ? (sessionRow.activityState === "working" ? "Working" : "Thinking")
+            : sessionRow.failure !== "" && sessionRow.pendingCount === 1 ? root.failureLabel(sessionRow.failure)
             : sessionRow.finished ? "Done" : String(sessionRow.pendingCount)
-          color: sessionRow.busy ? "#3b82f6" : sessionRow.finished ? "#22c55e" : sessionRow.foreground
+          color: sessionRow.busy ? "#3b82f6"
+            : sessionRow.failure !== "" ? root.failureColor(sessionRow.failure)
+            : sessionRow.finished ? "#22c55e" : sessionRow.foreground
           font.family: sessionRow.fontFamily
           font.pixelSize: sessionRow.fontSize
           font.bold: true
@@ -200,6 +206,7 @@ Panel {
       return thread.sessionTitle ? sessionProject(thread) + "  \u00b7  " + step : step
     }
     var prefix = latest.kind === "permission" ? "Permission: "
+      : latest.failure ? failureLabel(latest.failure) + ": "
       : latest.kind === "attention" ? "Waiting: "
       : latest.kind === "finished" ? "Finished: " : "Question: "
     var preview = prefix + String(latest.summary || "")
@@ -256,6 +263,23 @@ Panel {
 
   function threadFinished(thread) {
     return (thread.items || []).length > 0 && pendingItemCount(thread) === 0
+  }
+
+  /** "error" or "ratelimit" when one of the thread's items is a failed turn, else "". */
+  function threadFailure(thread) {
+    var items = thread.items || []
+    for (var index = 0; index < items.length; index++) {
+      if (items[index].failure) return String(items[index].failure)
+    }
+    return ""
+  }
+
+  function failureLabel(failure) {
+    return failure === "ratelimit" ? "Rate limited" : "Error"
+  }
+
+  function failureColor(failure) {
+    return failure === "ratelimit" ? "#f97316" : "#ef4444"
   }
 
   function threadBusy(thread) {
@@ -680,9 +704,11 @@ Panel {
                   width: parent.width
                   spacing: Style.space(8)
                   Text {
-                    text: itemDelegate.itemData.kind === "attention" ? "\u21a9"
+                    text: itemDelegate.itemData.failure ? "!"
+                      : itemDelegate.itemData.kind === "attention" ? "\u21a9"
                       : itemDelegate.itemData.kind === "finished" ? "\u2713" : "!"
-                    color: itemDelegate.itemData.kind === "attention" ? "#3b82f6"
+                    color: itemDelegate.itemData.failure ? root.failureColor(itemDelegate.itemData.failure)
+                      : itemDelegate.itemData.kind === "attention" ? "#3b82f6"
                       : itemDelegate.itemData.kind === "finished" ? "#22c55e" : "#ef4444"
                     font.family: root.bar ? root.bar.fontFamily : Style.font.family
                     font.pixelSize: Style.font.body
@@ -889,7 +915,11 @@ Panel {
 
                 Text {
                   visible: itemDelegate.itemData.kind === "attention" || itemDelegate.itemData.kind === "finished"
-                  text: itemDelegate.itemData.kind === "finished"
+                  text: itemDelegate.itemData.failure === "ratelimit"
+                    ? root.agentName(itemDelegate.itemData) + " stopped on a usage limit; retry in the terminal when it resets"
+                    : itemDelegate.itemData.failure
+                    ? root.agentName(itemDelegate.itemData) + " stopped on an error; retry in the terminal"
+                    : itemDelegate.itemData.kind === "finished"
                     ? root.agentName(itemDelegate.itemData) + " finished this turn"
                     : root.agentName(itemDelegate.itemData) + " is waiting for your reply in the terminal"
                   color: root.barForeground

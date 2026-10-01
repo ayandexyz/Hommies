@@ -109,6 +109,58 @@ test("the compiled Codex hook reports tool calls without answering them", async 
   });
 });
 
+test("a rate limit becomes a dismissable item and a ratelimit session state", async () => {
+  const sent = [];
+  await withServer(async ({ request }) => {
+    const response = await request("POST", "/v1/providers/claude/failure", {
+      hook_event_name: "StopFailure", session_id: "f1", cwd: "/w/app", error: "rate_limit", error_details: "429 Too Many Requests",
+    });
+    assert.equal(response.status, 200);
+    const snapshot = await pending(request);
+    assert.equal(snapshot.totalCount, 1);
+    const item = snapshot.threads[0].items[0];
+    assert.deepEqual([item.kind, item.failure, item.summary],
+      ["attention", "ratelimit", "Rate limited \u2014 wait and retry: 429 Too Many Requests"]);
+    assert.equal(snapshot.sessions[0].state, "ratelimit");
+
+    await request("POST", "/v1/respond", { threadId: "f1", requestId: item.id, decision: "cancel" });
+    assert.equal((await pending(request)).totalCount, 0);
+  }, { notify: (notification) => sent.push(notification) });
+  assert.deepEqual(sent.map((notification) => [notification.body, notification.urgency]),
+    [["Rate limited: Rate limited \u2014 wait and retry: 429 Too Many Requests", "normal"]]);
+});
+
+test("other failures are errors, unknown ones still show, and the next prompt clears them", async () => {
+  await withServer(async ({ request }) => {
+    await request("POST", "/v1/providers/opencode/failure", { session_id: "f2", error: "authentication_failed" });
+    let snapshot = await pending(request);
+    assert.deepEqual([snapshot.threads[0].items[0].failure, snapshot.threads[0].items[0].summary], ["error", "Not signed in \u2014 log in again"]);
+    assert.equal(snapshot.sessions[0].state, "error");
+
+    await request("POST", "/v1/providers/claude/failure", { session_id: "f3", error: "something_new" });
+    snapshot = await pending(request);
+    assert.equal(snapshot.threads.find((thread) => thread.threadId === "f3").items[0].summary, "Turn failed");
+
+    await request("POST", "/v1/providers/opencode/resume", { hook_event_name: "UserPromptSubmit", session_id: "f2" });
+    snapshot = await pending(request);
+    assert.equal(snapshot.sessions.find((session) => session.threadId === "f2").state, "thinking");
+    assert.equal(snapshot.threads.some((thread) => thread.threadId === "f2"), false);
+
+    assert.equal((await request("POST", "/v1/providers/claude/failure", { session_id: "f4" })).status, 400);
+  });
+});
+
+test("the compiled Claude hook reports StopFailure without writing to stdout", async () => {
+  await withServer(async ({ request, dataDir }) => {
+    const stdout = await runHook("claude-hook.js", {
+      hook_event_name: "StopFailure", session_id: "k5", cwd: "/w/app", error: "server_error", error_details: "500",
+    }, { AGENT_FOLD_DATA_DIR: dataDir });
+    assert.equal(stdout, "");
+    const item = (await pending(request)).threads[0].items[0];
+    assert.deepEqual([item.provider, item.failure, item.summary], ["claude", "error", "API unavailable \u2014 retry: 500"]);
+  });
+});
+
 function sessionsOf(snapshot) {
   return snapshot.sessions.map((session) => [session.threadId, session.provider, session.state, session.steps]);
 }
@@ -128,9 +180,9 @@ async function pending(request) {
   return request("GET", "/v1/pending").then((response) => response.json());
 }
 
-async function withServer(run) {
+async function withServer(run, options = {}) {
   const dataDir = await mkdtemp(join(tmpdir(), "agent-fold-activity-test-"));
-  const server = await startBridgeServer({ dataDir, port: 0 });
+  const server = await startBridgeServer({ dataDir, port: 0, ...options });
   try {
     const connection = JSON.parse(await readFile(join(dataDir, "port.json"), "utf8"));
     const headers = { "content-type": "application/json", "x-agent-fold-token": connection.token };

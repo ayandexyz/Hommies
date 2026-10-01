@@ -41,6 +41,7 @@ test("Claude hooks merge beside the user's own hooks and replace stale agent-fol
   assert.deepEqual(next.hooks.PreToolUse, [{ matcher: "*", hooks: [{ type: "command", command: "node /new/agent-fold/dist/claude-hook.js" }] }]);
   assert.deepEqual(next.hooks.PostToolUse, [{ matcher: "AskUserQuestion", hooks: [{ type: "command", command: "node /new/agent-fold/dist/claude-hook.js" }] }]);
   assert.equal(next.hooks.SessionStart[0].hooks[0].timeout, 5);
+  assert.equal(next.hooks.StopFailure[0].hooks[0].timeout, 5);
   assert.equal(next.hooks.PermissionRequest[0].hooks[0].timeout, 305);
   assert.deepEqual(mergeClaudeSettings(next, "node /new/agent-fold/dist/claude-hook.js"), next, "setup is idempotent");
   assert.deepEqual(mergeClaudeSettings(next, null), { model: "opus", hooks: { Stop: [userStop] } });

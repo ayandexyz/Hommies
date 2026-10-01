@@ -64,7 +64,15 @@ export interface PendingItem {
   readonly questions?: ReadonlyArray<PendingQuestionPrompt>;
   /** The surface that owns the response; the other surface is display-only. */
   readonly answerSurface?: QuestionAnswerSurface;
+  /**
+   * Set on an `attention` item when the turn ended on an error instead of a
+   * reply. Optional, so older clients show it as a plain attention item.
+   */
+  readonly failure?: SessionFailureKind;
 }
+
+/** `ratelimit` covers usage limits and an overloaded API; anything else is `error`. */
+export type SessionFailureKind = "error" | "ratelimit";
 
 /**
  * The aggregate response shape for `GET /v1/pending`. Threads group items so
@@ -92,8 +100,10 @@ export interface PendingResponse {
  * - `thinking`: the user sent a prompt and no tool has run yet
  * - `working`: the agent is running tools
  * - `idle`: the session started or its turn ended
+ * - `error` / `ratelimit`: the turn ended on an API error or a usage limit;
+ *   cleared by the next prompt or tool call
  */
-export type SessionActivityState = "idle" | "thinking" | "working";
+export type SessionActivityState = "idle" | "thinking" | "working" | SessionFailureKind;
 
 export interface SessionActivity {
   /** Same id as the session's thread in `threads`. */
@@ -184,6 +194,22 @@ export interface ClaudeTurnHookInput {
   readonly session_title?: string;
   /** The submitted prompt on UserPromptSubmit; shown as an activity step. */
   readonly prompt?: string;
+}
+
+/**
+ * Body for `POST /v1/providers/{provider}/failure`: the turn ended on an error
+ * (Claude's `StopFailure` hook, OpenCode's `session.error`). Notify-only.
+ * `error` uses Claude's names (`rate_limit`, `overloaded`, `billing_error`,
+ * `authentication_failed`, `server_error`, `max_output_tokens`, ...); unknown
+ * values are shown as a generic failure.
+ */
+export interface FailureHookInput {
+  readonly session_id: string;
+  readonly cwd?: string;
+  readonly session_title?: string;
+  readonly hook_event_name?: "StopFailure";
+  readonly error: string;
+  readonly error_details?: string;
 }
 
 /**

@@ -24,6 +24,7 @@ The server binds to `127.0.0.1` only. Routes:
 | `GET` | `/v1/pending` | Pending questions + permissions across all threads, grouped by thread, plus each running session's live activity (`sessions`). |
 | `GET` | `/v1/stream` | SSE: emits deltas as the projection changes. |
 | `POST` | `/v1/respond` | Dispatch a user response to an open question or permission request, or dismiss an `attention` item. |
+| `POST` | `/v1/providers/{provider}/failure` | Notify-only: a turn ended on an API error or a usage limit (see [Errors and rate limits](#errors-and-rate-limits)). |
 | `POST` | `/v1/providers/{provider}/activity` | Notify-only: a session started, ran a tool, or a tool failed (see [Live activity](#live-activity)). |
 | `POST` | `/v1/preferences` | Select whether the top bar or the agent's CLI owns question answers, and toggle desktop notifications. |
 | `GET` | `/healthz` | Liveness probe. |
@@ -80,6 +81,7 @@ After installing `@thisisayande/agent-fold`, add this hook to `~/.claude/setting
     "PostToolUse": [{ "matcher": "AskUserQuestion", "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/agent-fold/dist/claude-hook.js" }] }],
     "PostToolUseFailure": [{ "matcher": "*", "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/agent-fold/dist/claude-hook.js", "timeout": 5 }] }],
     "Stop": [{ "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/agent-fold/dist/claude-hook.js", "timeout": 5 }] }],
+    "StopFailure": [{ "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/agent-fold/dist/claude-hook.js", "timeout": 5 }] }],
     "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/agent-fold/dist/claude-hook.js", "timeout": 5 }] }],
     "SessionEnd": [{ "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/agent-fold/dist/claude-hook.js", "timeout": 5 }] }],
     "PermissionRequest": [
@@ -182,6 +184,43 @@ The field is optional, so older plugin copies ignore it. Adapters post to
 prompt step comes from an optional `prompt` field on the existing
 `UserPromptSubmit` body sent to `/v1/providers/{provider}/resume`.
 
+## Errors and rate limits
+
+When a turn ends on an API error instead of a reply, the session gets an
+`attention` item with a `failure` field and its session state becomes
+`error` or `ratelimit`. The bar shows it in red (error) or orange (rate limit),
+it counts toward the bell, and it sends a desktop notification (critical for
+errors, normal for rate limits). Like other attention items it is dismissed
+with any decision on `/v1/respond`, and it clears when you send the next
+prompt or the agent runs another tool.
+
+| Error (`error`) | State | Shown as |
+| --- | --- | --- |
+| `rate_limit` | `ratelimit` | Rate limited — wait and retry |
+| `overloaded` | `ratelimit` | API overloaded — wait and retry |
+| `billing_error` | `error` | Billing error — check your plan or credits |
+| `authentication_failed`, `oauth_org_not_allowed`, `account_on_hold`, `verification_required`, `cloud_credential_error` | `error` | A sign-in or account message |
+| `server_error` | `error` | API unavailable — retry |
+| `max_output_tokens` | `error` | Hit the output token limit |
+| `model_not_found`, `invalid_request` | `error` | Model not found / Request rejected by the API |
+| anything else | `error` | Turn failed |
+
+`error_details`, when sent, is added after the label. Sources:
+
+- **Claude Code**: the `StopFailure` hook.
+- **OpenCode**: `session.error` (not for Esc interrupts or subagents). A 429 is
+  a rate limit, 529 overloaded, other 5xx a server error, `ProviderAuthError`
+  a sign-in error, and `MessageOutputLengthError` the output token limit.
+- **Codex** has no failure hook, so its failed turns are not reported.
+
+Adapters post to `/v1/providers/{provider}/failure`:
+
+```json
+{ "hook_event_name": "StopFailure", "session_id": "...", "cwd": "/w/app", "error": "rate_limit", "error_details": "429 Too Many Requests" }
+```
+
+Older plugin copies ignore `failure` and show these as plain attention items.
+
 ## Desktop notifications
 
 `agent-fold-bridge` sends a desktop notification (via `notify-send`) for every
@@ -242,6 +281,8 @@ features as Claude Code:
   `Stop` hooks. Items clear when you send a message, delete the session, or
   interrupt the turn with Esc.
 - **Session names** from OpenCode's generated session title.
+- **Errors and rate limits** (`session.error`): a failed turn becomes a red
+  or orange item instead of a finished one.
 - **Live activity** (`tool.execute.before`): each tool call shows up as a
   step, with subagent tool calls listed under the conversation that started
   them.

@@ -1,12 +1,13 @@
 #!/usr/bin/env node
-/** Command-hook adapter for Claude Code questions, permissions, turn ends, and live activity. */
+/** Command-hook adapter for Claude Code questions, permissions, turn ends, failures, and live activity. */
 import {
-  isActivityEvent, isTurnEvent, postToBridge, readConnection, readStdin, reportActivity, reportTurn, type ActivityHookEvent,
+  isActivityEvent, isTurnEvent, postToBridge, readConnection, readStdin, reportActivity, reportFailure, reportTurn,
+  type ActivityHookEvent, type FailureHookEvent,
 } from "./hook-common.js";
 import { lastAssistantText } from "./stop-detection.js";
 import { readSessionTitle, readTranscriptTail } from "./transcript.js";
 
-type HookEvent = ActivityHookEvent;
+type HookEvent = ActivityHookEvent & FailureHookEvent;
 
 async function main(): Promise<void> {
   const input = await readStdin();
@@ -16,6 +17,10 @@ async function main(): Promise<void> {
   if (connection === null) return;
   if (isActivityEvent(event)) {
     await reportActivity("claude", event, connection);
+    return;
+  }
+  if (event.hook_event_name === "StopFailure") {
+    await reportFailure("claude", event, connection, await readSessionTitle(event.transcript_path ?? undefined));
     return;
   }
   if (isTurnEvent(event.hook_event_name)) {

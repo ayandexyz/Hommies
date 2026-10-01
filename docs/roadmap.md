@@ -76,6 +76,14 @@ with a short timeout, and the README must document them.
 
 ## 2. Error and rate-limit states
 
+**Status: done.** See "Errors and rate limits" in
+`packages/omarchy-bridge/README.md`. What changed from the plan below: Claude's
+`Notification` hook has no rate-limit type, so both states come from
+`StopFailure`'s `error` field instead of matching message text. Failures are
+`attention` items with a new optional `failure` field (`error` or
+`ratelimit`), so v1 clients still show and dismiss them. Codex has no failure
+hook; OpenCode reports through `session.error`.
+
 **Goal:** show when a session failed or hit a usage limit, not just "finished".
 
 - `StopFailure` → session state `error`, plus an `attention`-style item with
