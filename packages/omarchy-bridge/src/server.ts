@@ -5,6 +5,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 
 import { ApprovalRequestId, ThreadId } from "./localContracts.js";
 import type {
+  ActivityHookInput,
   BridgePreferencesInput,
   BridgeServerOptions,
   ClaudePermissionHookInput,
@@ -16,6 +17,8 @@ import type {
   PendingResponse,
   PendingResponseInput,
   QuestionAnswerSurface,
+  SessionActivity,
+  SessionActivityState,
 } from "./types.js";
 import { detectReplyRequest, summarizeFinishedTurn } from "./stop-detection.js";
 import type { BridgeNotifier } from "./notifier.js";
@@ -23,6 +26,11 @@ import type { BridgeNotifier } from "./notifier.js";
 const responseTimeoutMs = 5 * 60 * 1000;
 /** Turn-end items outlive hook timeouts, but not an abandoned session. */
 const attentionTimeoutMs = 12 * 60 * 60 * 1000;
+/** Sessions with no events for this long are dropped: the agent likely exited without SessionEnd. */
+const idleSessionTimeoutMs = 30 * 60 * 1000;
+/** A busy session can sit in one long tool call (a build, a test run), so it gets longer. */
+const busySessionTimeoutMs = 3 * 60 * 60 * 1000;
+const maxSessionSteps = 20;
 
 interface PendingPermission {
   readonly item: PendingItem;
@@ -40,6 +48,8 @@ interface BridgeState {
   readonly questions: Map<string, PendingQuestion>;
   /** `attention` or `finished`, keyed by session id: only the latest turn end matters. */
   readonly attention: Map<string, PendingAttention>;
+  /** Live activity, keyed by session id. */
+  readonly sessions: Map<string, TrackedSession>;
   readonly streams: Set<ServerResponse>;
   readonly notify: BridgeNotifier | undefined;
   questionAnswerSurface: QuestionAnswerSurface;
@@ -85,6 +95,16 @@ function providerOf(item: PendingItem): Provider {
   }
 }
 
+interface TrackedSession {
+  readonly provider: Provider;
+  state: SessionActivityState;
+  steps: string[];
+  cwd: string | undefined;
+  sessionTitle: string | undefined;
+  updatedAt: string;
+  timer?: ReturnType<typeof setTimeout>;
+}
+
 interface PendingAttention {
   readonly item: PendingItem;
   readonly cwd: string | undefined;
@@ -106,6 +126,7 @@ export async function startBridgeServer(
     pending: new Map(),
     questions: new Map(),
     attention: new Map(),
+    sessions: new Map(),
     streams: new Set(),
     notify: options.notify,
     questionAnswerSurface: "topbar",
@@ -135,6 +156,8 @@ export async function startBridgeServer(
         question.resolve?.(null);
       }
       for (const attention of state.attention.values()) clearTimeout(attention.timer);
+      for (const session of state.sessions.values()) clearTimeout(session.timer);
+      state.sessions.clear();
       state.pending.clear();
       state.questions.clear();
       state.attention.clear();
@@ -189,7 +212,11 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     if (request.method === "POST" && turn) {
       const provider = turn[1] as Provider;
       const input = await readJson<ClaudeTurnHookInput>(request);
-      return turn[2] === "stop" ? receiveStop(response, input, provider, state) : receiveResume(response, input, state);
+      return turn[2] === "stop" ? receiveStop(response, input, provider, state) : receiveResume(response, input, provider, state);
+    }
+    const activity = /^\/v1\/providers\/(claude|codex|opencode|omacode)\/activity$/.exec(url.pathname);
+    if (request.method === "POST" && activity) {
+      return receiveActivity(response, await readJson<ActivityHookInput>(request), activity[1] as Provider, state);
     }
     return sendJson(response, 404, { error: "not found" });
   } catch (error: unknown) {
@@ -209,6 +236,7 @@ function receiveStop(response: ServerResponse, input: ClaudeTurnHookInput, provi
   const kind = question === null ? "finished" : "attention";
   const summary = question ?? summarizeFinishedTurn(input.last_assistant_message);
   clearAttention(state, input.session_id);
+  trackSession(state, provider, input.session_id, { cwd: input.cwd, sessionTitle: input.session_title, state: "idle" });
   const id = ApprovalRequestId(randomUUID());
   const timer = setTimeout(() => {
     if (state.attention.get(input.session_id)?.item.id !== id) return;
@@ -227,12 +255,86 @@ function receiveStop(response: ServerResponse, input: ClaudeTurnHookInput, provi
 }
 
 /** The user replied or the session ended, so the agent is no longer waiting. */
-function receiveResume(response: ServerResponse, input: ClaudeTurnHookInput, state: BridgeState): void {
+function receiveResume(response: ServerResponse, input: ClaudeTurnHookInput, provider: Provider, state: BridgeState): void {
   if ((input.hook_event_name !== "UserPromptSubmit" && input.hook_event_name !== "SessionEnd") || typeof input.session_id !== "string") {
     throw new Error("invalid resume payload");
   }
-  if (clearAttention(state, input.session_id)) publish(state);
+  clearAttention(state, input.session_id);
+  if (input.hook_event_name === "SessionEnd") dropSession(state, input.session_id);
+  else {
+    const prompt = typeof input.prompt === "string" ? oneLine(input.prompt, 80) : "";
+    trackSession(state, provider, input.session_id, {
+      cwd: input.cwd, sessionTitle: input.session_title, state: "thinking", ...(prompt ? { step: `> ${prompt}` } : {}),
+    });
+  }
+  publish(state);
   return sendJson(response, 200, { ok: true });
+}
+
+/** A session started, ran a tool, or a tool failed. Never blocks the agent. */
+function receiveActivity(response: ServerResponse, input: ActivityHookInput, provider: Provider, state: BridgeState): void {
+  if (!input || typeof input.session_id !== "string" || input.session_id.length === 0) throw new Error("invalid activity payload");
+  const toolInput = input.tool_input !== null && typeof input.tool_input === "object" ? input.tool_input : {};
+  const tool = typeof input.tool_name === "string" && input.tool_name.length > 0 ? input.tool_name : "Tool";
+  switch (input.hook_event_name) {
+    case "SessionStart":
+      trackSession(state, provider, input.session_id, {
+        cwd: input.cwd, sessionTitle: input.session_title, state: state.sessions.get(input.session_id)?.state ?? "idle",
+      });
+      break;
+    case "PreToolUse":
+      // A new tool call means the agent is no longer waiting on a turn-end reply.
+      clearAttention(state, input.session_id);
+      trackSession(state, provider, input.session_id, {
+        cwd: input.cwd, sessionTitle: input.session_title, state: "working", step: describeStep(tool, toolInput),
+      });
+      break;
+    case "PostToolUseFailure":
+      trackSession(state, provider, input.session_id, {
+        cwd: input.cwd, sessionTitle: input.session_title, state: "working", step: `${describeStep(tool, toolInput)} (failed)`,
+      });
+      break;
+    default:
+      throw new Error("invalid activity event");
+  }
+  publish(state);
+  return sendJson(response, 200, { ok: true });
+}
+
+interface SessionUpdate {
+  readonly cwd?: string | undefined;
+  readonly sessionTitle?: string | undefined;
+  readonly state?: SessionActivityState;
+  readonly step?: string;
+}
+
+/** Creates or refreshes a session's activity and restarts its expiry timer. Callers publish. */
+function trackSession(state: BridgeState, provider: Provider, sessionId: string, update: SessionUpdate): void {
+  const existing = state.sessions.get(sessionId);
+  if (existing) clearTimeout(existing.timer);
+  const session: TrackedSession = existing ?? { provider, state: "idle", steps: [], cwd: undefined, sessionTitle: undefined, updatedAt: "" };
+  if (typeof update.cwd === "string" && update.cwd.length > 0) session.cwd = update.cwd;
+  if (typeof update.sessionTitle === "string" && update.sessionTitle.length > 0) session.sessionTitle = update.sessionTitle;
+  if (update.state !== undefined) session.state = update.state;
+  if (update.step !== undefined) {
+    session.steps.push(update.step);
+    if (session.steps.length > maxSessionSteps) session.steps.splice(0, session.steps.length - maxSessionSteps);
+  }
+  session.updatedAt = new Date().toISOString();
+  const timer = setTimeout(() => {
+    if (state.sessions.get(sessionId)?.timer !== timer) return;
+    state.sessions.delete(sessionId);
+    publish(state);
+  }, session.state === "idle" ? idleSessionTimeoutMs : busySessionTimeoutMs);
+  session.timer = timer;
+  state.sessions.set(sessionId, session);
+}
+
+function dropSession(state: BridgeState, sessionId: string): void {
+  const session = state.sessions.get(sessionId);
+  if (!session) return;
+  clearTimeout(session.timer);
+  state.sessions.delete(sessionId);
 }
 
 function clearAttention(state: BridgeState, sessionId: string): boolean {
@@ -251,6 +353,7 @@ async function receiveQuestion(response: ServerResponse, input: ClaudeQuestionHo
   if (input.hook_event_name === "PreToolUse" && input.tool_name === "AskUserQuestion") {
     // A new tool call means the agent is working again in this session.
     clearAttention(state, input.session_id);
+    trackSession(state, provider, input.session_id, { cwd: input.cwd, sessionTitle: input.session_title });
     const id = ApprovalRequestId(questionKey(input.session_id, input.tool_use_id));
     const questions = parseQuestions(input.tool_input);
     const item: PendingItem = {
@@ -439,6 +542,7 @@ async function receivePermission(response: ServerResponse, input: ClaudePermissi
   if (!isClaudePermissionInput(input)) throw new Error("invalid Claude PermissionRequest payload");
   // A new request means the agent is working again in this session.
   clearAttention(state, input.session_id);
+  trackSession(state, provider, input.session_id, { cwd: input.cwd, sessionTitle: input.session_title });
   // OpenCode and Omacode ids let their integrations clear the item when the TUI answers first.
   const id = ApprovalRequestId(hasRequestIds(provider) && typeof input.request_id === "string" && input.request_id.length > 0
     ? input.request_id
@@ -528,7 +632,28 @@ function snapshot(state: BridgeState): PendingResponse {
   for (const { item, cwd, sessionTitle } of state.attention.values()) {
     add(item, providerLabels[providerOf(item)].thread, cwd, sessionTitle);
   }
-  return { totalCount: state.pending.size + state.questions.size + state.attention.size, threads: [...threads.values()] };
+  return {
+    totalCount: state.pending.size + state.questions.size + state.attention.size,
+    threads: [...threads.values()],
+    sessions: sessionsSnapshot(state),
+  };
+}
+
+function sessionsSnapshot(state: BridgeState): SessionActivity[] {
+  return [...state.sessions.entries()]
+    .map(([sessionId, session]): SessionActivity => {
+      const project = session.cwd ? basename(session.cwd) || session.cwd : undefined;
+      return {
+        threadId: ThreadId(sessionId),
+        provider: session.provider,
+        state: session.state,
+        steps: [...session.steps],
+        ...(session.sessionTitle ? { sessionTitle: session.sessionTitle } : {}),
+        ...(project ? { project } : {}),
+        updatedAt: session.updatedAt,
+      };
+    })
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
 }
 
 interface ClaudeQuestionHookInput {
@@ -629,6 +754,26 @@ async function readJson<T>(request: IncomingMessage): Promise<T> {
 
 function isClaudePermissionInput(input: ClaudePermissionHookInput): boolean {
   return typeof input.session_id === "string" && typeof input.cwd === "string" && typeof input.tool_name === "string" && input.tool_input !== null && typeof input.tool_input === "object";
+}
+
+/** A short activity label such as `Edit server.ts` or `Bash pnpm test`. */
+export function describeStep(toolName: string, toolInput: Readonly<Record<string, unknown>>): string {
+  // `mcp__server__tool` reads better as `server · tool`.
+  const tool = toolName.startsWith("mcp__") ? toolName.slice(5).split("__").join(" \u00b7 ") : toolName;
+  const text = (key: string): string | null => {
+    const value = toolInput[key];
+    return typeof value === "string" && value.trim().length > 0 ? value : null;
+  };
+  const path = text("file_path") ?? text("notebook_path") ?? text("path");
+  const target = text("command") ?? (path === null ? null : basename(path) || path)
+    ?? text("pattern") ?? text("query") ?? text("url") ?? text("description");
+  return target === null ? tool : `${tool} ${oneLine(target, 60)}`;
+}
+
+/** First line of `text`, whitespace collapsed, cut to `max` characters. */
+function oneLine(text: string, max: number): string {
+  const line = (text.split("\n").find((part) => part.trim().length > 0) ?? "").replace(/\s+/g, " ").trim();
+  return line.length > max ? `${line.slice(0, max - 3)}...` : line;
 }
 
 function describeTool(toolName: string, toolInput: Record<string, unknown>): string {

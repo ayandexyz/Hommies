@@ -21,9 +21,10 @@ The server binds to `127.0.0.1` only. Routes:
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `GET` | `/v1/pending` | Pending questions + permissions across all threads, grouped by thread. |
+| `GET` | `/v1/pending` | Pending questions + permissions across all threads, grouped by thread, plus each running session's live activity (`sessions`). |
 | `GET` | `/v1/stream` | SSE: emits deltas as the projection changes. |
 | `POST` | `/v1/respond` | Dispatch a user response to an open question or permission request, or dismiss an `attention` item. |
+| `POST` | `/v1/providers/{provider}/activity` | Notify-only: a session started, ran a tool, or a tool failed (see [Live activity](#live-activity)). |
 | `POST` | `/v1/preferences` | Select whether the top bar or the agent's CLI owns question answers, and toggle desktop notifications. |
 | `GET` | `/healthz` | Liveness probe. |
 
@@ -74,9 +75,10 @@ After installing `@thisisayande/agent-fold`, add this hook to `~/.claude/setting
 ```json
 {
   "hooks": {
-    "PreToolUse": [{ "matcher": "AskUserQuestion", "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/agent-fold/dist/claude-hook.js" }] }],
+    "SessionStart": [{ "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/agent-fold/dist/claude-hook.js", "timeout": 5 }] }],
+    "PreToolUse": [{ "matcher": "*", "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/agent-fold/dist/claude-hook.js" }] }],
     "PostToolUse": [{ "matcher": "AskUserQuestion", "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/agent-fold/dist/claude-hook.js" }] }],
-    "PostToolUseFailure": [{ "matcher": "AskUserQuestion", "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/agent-fold/dist/claude-hook.js" }] }],
+    "PostToolUseFailure": [{ "matcher": "*", "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/agent-fold/dist/claude-hook.js", "timeout": 5 }] }],
     "Stop": [{ "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/agent-fold/dist/claude-hook.js", "timeout": 5 }] }],
     "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/agent-fold/dist/claude-hook.js", "timeout": 5 }] }],
     "SessionEnd": [{ "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/agent-fold/dist/claude-hook.js", "timeout": 5 }] }],
@@ -106,6 +108,11 @@ metadata. In top-bar mode the hook waits for `/v1/respond`; in CLI mode it
 returns immediately and keeps a read-only mirror until PostToolUse or
 PostToolUseFailure closes the item.
 
+`PreToolUse` and `PostToolUseFailure` match every tool: the hook blocks only
+for `AskUserQuestion` and reports every other tool call as
+[live activity](#live-activity). If you only want questions and permissions,
+set both matchers back to `AskUserQuestion` and drop `SessionStart`.
+
 ### Plain-text questions (`Stop` hook)
 
 Claude sometimes ends its turn with a question in prose ("Should I commit
@@ -124,6 +131,57 @@ submit a prompt in that session (`UserPromptSubmit`), when the session ends
 you press **Dismiss**, or after 12 hours. These hooks never write to stdout and
 never block Claude.
 
+## Live activity
+
+Besides the items that need you, the bar shows what each running session is
+doing: **Thinking** after you send a prompt, **Working** while it runs tools,
+and its latest steps, such as `> fix the build`, `Bash pnpm test`, or
+`Edit server.ts` (`(failed)` is added when a tool fails). Activity never
+counts toward the bell; a dot next to the bell means at least one session is
+busy.
+
+| Event | Session state | Step |
+| --- | --- | --- |
+| `SessionStart` | idle | — |
+| `UserPromptSubmit` | thinking | `> ` + the prompt's first line |
+| `PreToolUse` | working | tool + command, file name, pattern, query, or URL |
+| `PostToolUseFailure` | working | same, with `(failed)` |
+| `Stop` | idle | — |
+| `SessionEnd` | removed | — |
+
+Sessions keep their last 20 steps in memory. An idle session with no events
+for 30 minutes is dropped (3 hours for a busy one, since one tool call can run
+long), so a crashed agent does not stay listed.
+
+The adapters send only the short string fields of `tool_input` the labels use
+(`command`, `file_path`, `path`, `pattern`, `query`, `url`, `description`), never
+file contents or diffs. The activity hooks run on every tool call, so they stay
+cheap: no transcript reads, a 1-second request timeout, and no stdout. If the
+bridge is not running they exit at once.
+
+`GET /v1/pending` lists the activity in `sessions`, newest first:
+
+```json
+{
+  "sessions": [{
+    "threadId": "<session id>", "provider": "claude", "state": "working",
+    "steps": ["> fix the build", "Bash pnpm build"],
+    "sessionTitle": "Fix the build", "project": "app", "updatedAt": "2026-10-01T12:00:00.000Z"
+  }]
+}
+```
+
+The field is optional, so older plugin copies ignore it. Adapters post to
+`/v1/providers/{claude,codex,opencode,omacode}/activity`:
+
+```json
+{ "hook_event_name": "PreToolUse", "session_id": "...", "cwd": "/w/app", "tool_name": "Bash", "tool_input": { "command": "pnpm build" } }
+```
+
+`hook_event_name` is `SessionStart`, `PreToolUse`, or `PostToolUseFailure`. The
+prompt step comes from an optional `prompt` field on the existing
+`UserPromptSubmit` body sent to `/v1/providers/{provider}/resume`.
+
 ## Desktop notifications
 
 `agent-fold-bridge` sends a desktop notification (via `notify-send`) for every
@@ -141,7 +199,8 @@ Codex gets the same features as Claude Code, through Codex's own hooks:
 permission requests from the bar, plain-text question and finished-turn
 detection (`Stop`), clearing on reply or session end (`UserPromptSubmit`,
 `SessionEnd`), session names from the `thread_name` in
-`$CODEX_HOME/session_index.jsonl`, and desktop notifications. Codex's
+`$CODEX_HOME/session_index.jsonl`, [live activity](#live-activity) from
+`SessionStart` and `PreToolUse`, and desktop notifications. Codex's
 structured `request_user_input` tool is only offered in Plan mode and is not
 mirrored; in Default mode Codex asks in plain text, which the `Stop` detection
 covers.
@@ -152,6 +211,8 @@ groups:
 ```json
 {
   "hooks": {
+    "SessionStart": [{ "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/agent-fold/dist/codex-hook.js", "timeout": 5 }] }],
+    "PreToolUse": [{ "matcher": "*", "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/agent-fold/dist/codex-hook.js", "timeout": 5 }] }],
     "PermissionRequest": [
       { "matcher": "*", "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/agent-fold/dist/codex-hook.js", "timeout": 305 }] }
     ],
@@ -181,6 +242,9 @@ features as Claude Code:
   `Stop` hooks. Items clear when you send a message, delete the session, or
   interrupt the turn with Esc.
 - **Session names** from OpenCode's generated session title.
+- **Live activity** (`tool.execute.before`): each tool call shows up as a
+  step, with subagent tool calls listed under the conversation that started
+  them.
 - **Desktop notifications**.
 
 OpenCode keeps showing its own prompt while the bar shows the request, and
@@ -220,6 +284,9 @@ request-id protocol as the OpenCode plugin:
   else becomes `finished`. Items clear when the next turn starts or you
   interrupt the turn; a turn that failed is not reported.
 - **Session names** from Omacode's session title, grouped by project folder.
+
+Omacode does not report [live activity](#live-activity) yet; the
+`/v1/providers/omacode/activity` route is ready for it.
 
 Omacode keeps showing its own prompt, and whichever surface answers first wins.
 It reads `port.json` on every report, so it follows a restarted bridge, and does

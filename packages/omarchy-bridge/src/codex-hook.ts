@@ -1,15 +1,21 @@
 #!/usr/bin/env node
-/** Command-hook adapter for Codex permission requests and turn ends. */
-import { isTurnEvent, postToBridge, readConnection, readStdin, reportTurn, type TurnHookEvent } from "./hook-common.js";
+/** Command-hook adapter for Codex permission requests, turn ends, and live activity. */
+import {
+  isActivityEvent, isTurnEvent, postToBridge, readConnection, readStdin, reportActivity, reportTurn, type ActivityHookEvent,
+} from "./hook-common.js";
 import { lastCodexAssistantText, readCodexSessionTitle } from "./codex-transcript.js";
 import { readTranscriptTail } from "./transcript.js";
 
 async function main(): Promise<void> {
   const input = await readStdin();
-  let event: TurnHookEvent;
-  try { event = JSON.parse(input) as TurnHookEvent; } catch { return; }
+  let event: ActivityHookEvent;
+  try { event = JSON.parse(input) as ActivityHookEvent; } catch { return; }
   const connection = await readConnection();
   if (connection === null) return;
+  if (isActivityEvent(event)) {
+    await reportActivity("codex", event, connection);
+    return;
+  }
   if (isTurnEvent(event.hook_event_name)) {
     await reportTurn("codex", event, connection, {
       lastAssistantText: async ({ transcript_path }) => {
@@ -20,6 +26,8 @@ async function main(): Promise<void> {
     });
     return;
   }
+  // Only PermissionRequest blocks; any other named event is not ours to answer.
+  if (event.hook_event_name !== undefined && event.hook_event_name !== "PermissionRequest") return;
   try {
     // Label the session in the bar with the name Codex shows in `codex resume`.
     const sessionTitle = await readCodexSessionTitle(event.session_id);

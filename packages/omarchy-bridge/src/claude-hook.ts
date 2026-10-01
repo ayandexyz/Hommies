@@ -1,12 +1,12 @@
 #!/usr/bin/env node
-/** Command-hook adapter for Claude Code questions, permissions, and turn ends. */
-import { isTurnEvent, postToBridge, readConnection, readStdin, reportTurn, type TurnHookEvent } from "./hook-common.js";
+/** Command-hook adapter for Claude Code questions, permissions, turn ends, and live activity. */
+import {
+  isActivityEvent, isTurnEvent, postToBridge, readConnection, readStdin, reportActivity, reportTurn, type ActivityHookEvent,
+} from "./hook-common.js";
 import { lastAssistantText } from "./stop-detection.js";
 import { readSessionTitle, readTranscriptTail } from "./transcript.js";
 
-interface HookEvent extends TurnHookEvent {
-  readonly tool_name?: string;
-}
+type HookEvent = ActivityHookEvent;
 
 async function main(): Promise<void> {
   const input = await readStdin();
@@ -14,6 +14,10 @@ async function main(): Promise<void> {
   try { event = JSON.parse(input) as HookEvent; } catch { return; }
   const connection = await readConnection();
   if (connection === null) return;
+  if (isActivityEvent(event)) {
+    await reportActivity("claude", event, connection);
+    return;
+  }
   if (isTurnEvent(event.hook_event_name)) {
     await reportTurn("claude", event, connection, {
       lastAssistantText: async ({ transcript_path }) => {

@@ -1,7 +1,7 @@
 /**
  * OpenCode server plugin: mirrors permission requests, `question` tool calls,
- * and turn ends into agent-fold, and answers OpenCode with what you pick in
- * the bar.
+ * turn ends, and tool activity into agent-fold, and answers OpenCode with what
+ * you pick in the bar.
  *
  * OpenCode has no command hooks, so this runs inside OpenCode and talks to it
  * through the plugin's in-process client. Requests stay open in OpenCode's TUI
@@ -153,6 +153,16 @@ export const AgentFoldOpenCode = async (input: PluginInput) => {
     }, turnTimeoutMs);
   };
 
+  /** Reports a tool call as live activity. Fire-and-forget, like the command hooks. */
+  const onToolCall = async (sessionId: string, tool: string, args: unknown): Promise<void> => {
+    const rootId = roots.get(sessionId);
+    const session = rootId === undefined ? await rootSession(sessionId) : null;
+    const fields = session === null ? { session_id: rootId ?? sessionId } : sessionFields(session);
+    await send("/v1/providers/opencode/activity", {
+      ...fields, hook_event_name: "PreToolUse", tool_name: tool, tool_input: stepDetail(args),
+    }, turnTimeoutMs);
+  };
+
   const onIdle = async (sessionId: string): Promise<void> => {
     const session = await getSession(sessionId);
     // Subagents finishing is not the conversation finishing.
@@ -213,6 +223,14 @@ export const AgentFoldOpenCode = async (input: PluginInput) => {
       aborted.delete(sessionID);
       void resume(sessionID, "UserPromptSubmit").catch(() => undefined);
     },
+    "tool.execute.before": async (
+      { tool, sessionID }: { readonly tool: string; readonly sessionID: string },
+      output: { readonly args?: unknown },
+    ): Promise<void> => {
+      // The question tool already shows up as a question item.
+      if (tool === "question") return;
+      void onToolCall(sessionID, tool, output?.args).catch(() => undefined);
+    },
   };
 };
 
@@ -234,6 +252,23 @@ function permissionDetail(request: Readonly<Record<string, unknown>>): Record<st
     ...(filePath === null ? {} : { file_path: filePath }),
     ...(patterns.length > 0 ? { description: patterns.join(" ") } : {}),
   };
+}
+
+/** OpenCode tool args use camelCase; the bridge labels steps from these snake_case fields. */
+function stepDetail(args: unknown): Record<string, string> {
+  if (!isRecord(args)) return {};
+  const fields: Record<string, unknown> = {
+    command: args.command,
+    file_path: args.filePath ?? args.file_path,
+    path: args.path,
+    pattern: args.pattern,
+    query: args.query,
+    url: args.url,
+    description: args.description,
+  };
+  const detail: Record<string, string> = {};
+  for (const [key, value] of Object.entries(fields)) if (typeof value === "string") detail[key] = value.slice(0, 300);
+  return detail;
 }
 
 function decisionOf(result: unknown): "allow" | "deny" | null {

@@ -26,7 +26,16 @@ BarWidget {
   readonly property string questionAnswerSurface: String(setting("questionAnswerSurface", "Top bar")) === "Claude CLI"
     ? "cli" : "topbar"
   readonly property bool desktopNotifications: setting("desktopNotifications", true) !== false
-  property var snapshot: ({ totalCount: 0, threads: [] })
+  property var snapshot: ({ totalCount: 0, threads: [], sessions: [] })
+  /** Sessions thinking or running tools; shown as a dot next to the bell. */
+  readonly property int busyCount: {
+    var sessions = snapshot && snapshot.sessions ? snapshot.sessions : []
+    var count = 0
+    for (var index = 0; index < sessions.length; index++) {
+      if (sessions[index].state === "working" || sessions[index].state === "thinking") count++
+    }
+    return count
+  }
 
   function open() {
     if (panelLoader.item) panelLoader.item.open()
@@ -128,10 +137,12 @@ BarWidget {
     id: button
     anchors.fill: parent
     bar: root.bar
-    text: root.snapshot.totalCount > 0 ? "\ud83d\udd14 " + root.snapshot.totalCount : "\ud83d\udd14"
-    tooltipText: root.snapshot.totalCount > 0
+    text: "\ud83d\udd14" + (root.snapshot.totalCount > 0 ? " " + root.snapshot.totalCount : "")
+      + (root.busyCount > 0 ? " \u25cf" : "")
+    tooltipText: (root.snapshot.totalCount > 0
       ? root.snapshot.totalCount + " pending agent item(s)"
-      : "agent-fold: no pending items"
+      : "agent-fold: no pending items")
+      + (root.busyCount > 0 ? "\n" + root.busyCount + " agent session(s) working" : "")
     onPressed: function (buttonCode) {
       if (buttonCode === Qt.LeftButton) root.toggle()
     }

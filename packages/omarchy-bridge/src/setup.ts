@@ -24,10 +24,16 @@ interface HookSpec {
   readonly timeout?: number;
 }
 
+/**
+ * `PreToolUse` and `PostToolUseFailure` match every tool: the hook blocks only
+ * for AskUserQuestion and reports every other tool call as live activity.
+ * The AskUserQuestion PreToolUse hook has no timeout because it waits for the bar.
+ */
 const CLAUDE_HOOKS: ReadonlyArray<HookSpec> = [
-  { event: "PreToolUse", matcher: "AskUserQuestion" },
+  { event: "SessionStart", timeout: 5 },
+  { event: "PreToolUse", matcher: "*" },
   { event: "PostToolUse", matcher: "AskUserQuestion" },
-  { event: "PostToolUseFailure", matcher: "AskUserQuestion" },
+  { event: "PostToolUseFailure", matcher: "*", timeout: 5 },
   { event: "PermissionRequest", timeout: 305 },
   { event: "Stop", timeout: 5 },
   { event: "UserPromptSubmit", timeout: 5 },
@@ -35,6 +41,8 @@ const CLAUDE_HOOKS: ReadonlyArray<HookSpec> = [
 ];
 
 const CODEX_HOOKS: ReadonlyArray<HookSpec> = [
+  { event: "SessionStart", timeout: 5 },
+  { event: "PreToolUse", matcher: "*", timeout: 5 },
   { event: "PermissionRequest", matcher: "*", timeout: 305 },
   { event: "Stop", timeout: 5 },
   { event: "UserPromptSubmit", timeout: 5 },

@@ -15,6 +15,8 @@ import "bridge.js" as Bridge
  * question, so the reply happens in the terminal and the bar can only dismiss.
  * `finished` items mark a session whose turn ended without a question. They
  * count toward the bell like other items but render as "Done".
+ * Sessions that are thinking or running tools are listed too, with their
+ * latest steps, even when nothing needs an answer (`snapshot.sessions`).
  *
  * Each provider tab first lists its sessions (one row per thread); clicking a
  * row opens that session's items and the back row returns to the list.
@@ -68,7 +70,10 @@ Panel {
     // from injecting `modelData`, which the delegate binds this from.
     property var threadData: ({ threadId: "", title: "", items: [] })
 
-    readonly property bool finished: root.threadFinished(threadData)
+    readonly property bool finished: !busy && root.threadFinished(threadData)
+    readonly property int pendingCount: root.pendingItemCount(threadData)
+    readonly property string activityState: threadData.activity ? String(threadData.activity.state) : ""
+    readonly property bool busy: pendingCount === 0 && (activityState === "working" || activityState === "thinking")
 
     text: ""
     leftAlign: true
@@ -102,8 +107,9 @@ Panel {
         }
         Text {
           id: sessionCount
-          text: sessionRow.finished ? "Done" : String(root.pendingItemCount(sessionRow.threadData))
-          color: sessionRow.finished ? "#22c55e" : sessionRow.foreground
+          text: sessionRow.busy ? (sessionRow.activityState === "working" ? "Working" : "Thinking")
+            : sessionRow.finished ? "Done" : String(sessionRow.pendingCount)
+          color: sessionRow.busy ? "#3b82f6" : sessionRow.finished ? "#22c55e" : sessionRow.foreground
           font.family: sessionRow.fontFamily
           font.pixelSize: sessionRow.fontSize
           font.bold: true
@@ -172,10 +178,27 @@ Panel {
     return sessionProject(thread) + "  \u00b7  " + String(thread.threadId).slice(0, 8)
   }
 
+  function latestStep(thread) {
+    var steps = thread.activity && thread.activity.steps ? thread.activity.steps : []
+    return steps.length > 0 ? String(steps[steps.length - 1]) : ""
+  }
+
+  /** The open session's latest steps, newest last. */
+  function recentSteps(thread) {
+    var steps = thread && thread.activity && thread.activity.steps ? thread.activity.steps : []
+    var result = []
+    for (var index = Math.max(0, steps.length - 5); index < steps.length; index++) result.push(String(steps[index]))
+    return result
+  }
+
   function sessionPreview(thread) {
     var items = thread.items || []
     var latest = items.length > 0 ? items[items.length - 1] : null
-    if (!latest) return ""
+    if (!latest || (latest.kind === "finished" && thread.activity && thread.activity.state !== "idle")) {
+      var step = latestStep(thread)
+      if (!step) return thread.sessionTitle ? sessionProject(thread) : ""
+      return thread.sessionTitle ? sessionProject(thread) + "  \u00b7  " + step : step
+    }
     var prefix = latest.kind === "permission" ? "Permission: "
       : latest.kind === "attention" ? "Waiting: "
       : latest.kind === "finished" ? "Finished: " : "Question: "
@@ -199,6 +222,15 @@ Panel {
   function toggleQuestionAnswerSurface() {
     if (!hostWidget || typeof hostWidget.setQuestionAnswerSurface !== "function") return
     hostWidget.setQuestionAnswerSurface(root.questionsAnsweredInTopbar ? "cli" : "topbar")
+  }
+
+  function sessionActivity(provider) {
+    var sessions = hostWidget && hostWidget.snapshot && hostWidget.snapshot.sessions ? hostWidget.snapshot.sessions : []
+    var result = []
+    for (var index = 0; index < sessions.length; index++) {
+      if (sessions[index].provider === provider) result.push(sessions[index])
+    }
+    return result
   }
 
   function providerCount(provider) {
@@ -226,8 +258,14 @@ Panel {
     return (thread.items || []).length > 0 && pendingItemCount(thread) === 0
   }
 
+  function threadBusy(thread) {
+    var state = thread.activity ? thread.activity.state : ""
+    return pendingItemCount(thread) === 0 && (state === "working" || state === "thinking")
+  }
+
   function providerThreads(provider) {
     var result = []
+    var byId = {}
     var threads = hostWidget && hostWidget.snapshot ? hostWidget.snapshot.threads : []
     for (var threadIndex = 0; threadIndex < threads.length; threadIndex++) {
       var thread = threads[threadIndex]
@@ -236,19 +274,42 @@ Panel {
         if (thread.items[itemIndex].provider === provider) items.push(thread.items[itemIndex])
       }
       if (items.length > 0) {
-        result.push({
+        var entry = {
           threadId: thread.threadId,
           title: thread.title,
           sessionTitle: thread.sessionTitle,
           project: thread.project,
-          items: items
+          items: items,
+          activity: null
+        }
+        byId[thread.threadId] = entry
+        result.push(entry)
+      }
+    }
+    // Bridges older than `sessions` send none, so this adds nothing for them.
+    var sessions = sessionActivity(provider)
+    for (var sessionIndex = 0; sessionIndex < sessions.length; sessionIndex++) {
+      var session = sessions[sessionIndex]
+      var existing = byId[session.threadId]
+      if (existing) {
+        existing.activity = session
+        if (!existing.sessionTitle && session.sessionTitle) existing.sessionTitle = session.sessionTitle
+      } else if (session.state !== "idle") {
+        result.push({
+          threadId: session.threadId,
+          title: session.project || "",
+          sessionTitle: session.sessionTitle,
+          project: session.project,
+          items: [],
+          activity: session
         })
       }
     }
-    // Sessions that need you first; finished ones keep their relative order.
-    var waiting = result.filter(function(thread) { return !threadFinished(thread) })
-    var finished = result.filter(function(thread) { return threadFinished(thread) })
-    return waiting.concat(finished)
+    // Sessions that need you first, then busy ones; finished ones keep their relative order.
+    var waiting = result.filter(function(thread) { return pendingItemCount(thread) > 0 })
+    var busy = result.filter(function(thread) { return threadBusy(thread) })
+    var rest = result.filter(function(thread) { return pendingItemCount(thread) === 0 && !threadBusy(thread) })
+    return waiting.concat(busy).concat(rest)
   }
 
   function desiredPanelWidth() {
@@ -313,7 +374,7 @@ Panel {
 
         Text {
           width: parent.width
-          text: "Pending agent items"
+          text: "Agents"
           color: root.barForeground
           font.family: root.bar ? root.bar.fontFamily : Style.font.family
           font.pixelSize: Style.font.subtitle
@@ -433,7 +494,7 @@ Panel {
           width: parent.width
           topPadding: Style.space(12)
           bottomPadding: Style.space(12)
-          text: "No pending " + root.providerName(root.selectedProvider) + " items"
+          text: "No active " + root.providerName(root.selectedProvider) + " sessions"
           color: root.barForeground
           opacity: 0.65
           font.family: root.bar ? root.bar.fontFamily : Style.font.family
@@ -469,6 +530,38 @@ Panel {
               fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
               fontSize: Style.font.body
               onClicked: root.selectedThreadId = ""
+            }
+            Column {
+              visible: root.recentSteps(threadColumn.threadData).length > 0
+              width: parent.width
+              spacing: Style.space(2)
+
+              Text {
+                width: parent.width
+                text: threadColumn.threadData.activity && threadColumn.threadData.activity.state === "working" ? "Working"
+                  : threadColumn.threadData.activity && threadColumn.threadData.activity.state === "thinking" ? "Thinking"
+                  : "Recent activity"
+                color: root.barForeground
+                opacity: 0.72
+                font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                font.pixelSize: Style.font.caption
+                font.bold: true
+              }
+
+              Repeater {
+                model: root.recentSteps(threadColumn.threadData)
+                delegate: Text {
+                  width: parent.width
+                  leftPadding: Style.space(8)
+                  text: modelData
+                  textFormat: Text.PlainText
+                  elide: Text.ElideRight
+                  color: root.barForeground
+                  opacity: index === root.recentSteps(threadColumn.threadData).length - 1 ? 0.9 : 0.55
+                  font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                  font.pixelSize: Style.font.caption
+                }
+              }
             }
             Repeater {
               model: modelData.items

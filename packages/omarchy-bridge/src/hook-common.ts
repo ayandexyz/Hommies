@@ -13,11 +13,32 @@ export interface TurnHookEvent {
   readonly transcript_path?: string | null;
   readonly stop_hook_active?: boolean;
   readonly last_assistant_message?: string | null;
+  /** Sent on UserPromptSubmit. */
+  readonly prompt?: string;
+}
+
+/** Fields both agents send on SessionStart and the tool hooks. */
+export interface ActivityHookEvent extends TurnHookEvent {
+  readonly tool_name?: string;
+  readonly tool_input?: unknown;
 }
 
 export function isTurnEvent(name: string | undefined): boolean {
   return name === "Stop" || name === "UserPromptSubmit" || name === "SessionEnd";
 }
+
+/**
+ * Hooks that only feed the bar's live activity. AskUserQuestion's tool hooks
+ * are not activity: they carry the blocking question flow.
+ */
+export function isActivityEvent(event: ActivityHookEvent): boolean {
+  if (event.hook_event_name === "SessionStart") return true;
+  return (event.hook_event_name === "PreToolUse" || event.hook_event_name === "PostToolUseFailure") &&
+    event.tool_name !== "AskUserQuestion";
+}
+
+/** The `tool_input` fields the bridge labels steps with; file contents and diffs stay behind. */
+const stepFields = ["command", "file_path", "notebook_path", "path", "pattern", "query", "url", "description"];
 
 /** The running bridge's port and token, or `null` when it is not running. */
 export async function readConnection(): Promise<BridgeConnection | null> {
@@ -65,6 +86,9 @@ export async function reportTurn(
   // stop_hook_active means another Stop hook already kept the agent going.
   if (event.hook_event_name === "Stop" && event.stop_hook_active === true) return;
   let body: Record<string, unknown> = { hook_event_name: event.hook_event_name, session_id: event.session_id, cwd: event.cwd };
+  if (event.hook_event_name === "UserPromptSubmit" && typeof event.prompt === "string") {
+    body = { ...body, prompt: event.prompt.slice(0, 500) };
+  }
   if (event.hook_event_name === "Stop") {
     const message = typeof event.last_assistant_message === "string" && event.last_assistant_message.length > 0
       ? event.last_assistant_message
@@ -78,5 +102,34 @@ export async function reportTurn(
     await postToBridge(connection, path, JSON.stringify(body), 2_000);
   } catch {
     // Notifications are best-effort; never delay the agent's turn.
+  }
+}
+
+/**
+ * SessionStart and tool hooks run on every tool call, so this stays cheap:
+ * no transcript reads, a short timeout, and never any stdout (SessionStart
+ * stdout would be added to the agent's context; PreToolUse stdout is a decision).
+ */
+export async function reportActivity(
+  provider: "claude" | "codex",
+  event: ActivityHookEvent,
+  connection: BridgeConnection,
+): Promise<void> {
+  const input = event.tool_input !== null && typeof event.tool_input === "object" ? event.tool_input as Record<string, unknown> : {};
+  const toolInput: Record<string, string> = {};
+  for (const field of stepFields) {
+    const value = input[field];
+    if (typeof value === "string") toolInput[field] = value.slice(0, 300);
+  }
+  const body = {
+    hook_event_name: event.hook_event_name,
+    session_id: event.session_id,
+    cwd: event.cwd,
+    ...(typeof event.tool_name === "string" ? { tool_name: event.tool_name, tool_input: toolInput } : {}),
+  };
+  try {
+    await postToBridge(connection, `/v1/providers/${provider}/activity`, JSON.stringify(body), 1_000);
+  } catch {
+    // Activity is best-effort; never delay the agent.
   }
 }

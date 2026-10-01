@@ -10,6 +10,20 @@ YouTube, email, a meeting — and your agent has been waiting on a question for 
 `agent-fold` lives in the Omarchy top bar as a bell that shows the pending count, grouped
 by agent, with a click-through to the thread.
 
+## Features
+
+- **Answer from the bar**: permission requests and questions from Claude Code, Codex,
+  OpenCode, and Omacode, grouped by agent and session.
+- **Turn ends**: a session that stopped with a question in plain text shows as waiting
+  for your reply; one that simply finished shows as done.
+- **Live activity**: each running session shows whether it is thinking or working,
+  with its latest steps (`> fix the build`, `Bash pnpm test`, `Edit server.ts`). A dot
+  next to the bell means an agent is busy.
+- **Desktop notifications** for new items, with a toggle in the panel.
+
+`agent-fold setup` registers the hooks for every agent it finds. See
+[`packages/omarchy-bridge/README.md`](packages/omarchy-bridge/README.md) for setup and the HTTP API.
+
 ## Packages
 
 This is a pnpm workspace with two packages:

@@ -18,6 +18,12 @@ Every change must follow the rules in `AGENTS.md`:
 
 ## 1. Live session activity
 
+**Status: done.** See "Live activity" in `packages/omarchy-bridge/README.md`.
+What changed from the plan below: `PostToolUse` (other than for
+AskUserQuestion) and the subagent events are not hooked, to save a hook
+process per tool call. Subagent tool calls still show up through
+`PreToolUse`. Omacode does not report activity yet; its route is ready.
+
 **Goal:** show each session's state (idle, thinking, working) and a short feed
 of its latest steps, such as `Edit server.ts` or `Bash pnpm test`, not only the
 items that need an answer.

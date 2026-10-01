@@ -81,6 +81,31 @@ export interface PendingResponse {
     readonly project?: string;
     readonly items: ReadonlyArray<PendingItem>;
   }>;
+  /**
+   * What each running session is doing right now, newest first. Not counted in
+   * `totalCount`: nothing here needs an answer. Optional for HTTP compatibility.
+   */
+  readonly sessions?: ReadonlyArray<SessionActivity>;
+}
+
+/**
+ * - `thinking`: the user sent a prompt and no tool has run yet
+ * - `working`: the agent is running tools
+ * - `idle`: the session started or its turn ended
+ */
+export type SessionActivityState = "idle" | "thinking" | "working";
+
+export interface SessionActivity {
+  /** Same id as the session's thread in `threads`. */
+  readonly threadId: ThreadId;
+  readonly provider: ProviderDriverKind;
+  readonly state: SessionActivityState;
+  /** Latest steps, oldest first: prompts as `> text`, tool calls as `Tool target`. */
+  readonly steps: ReadonlyArray<string>;
+  readonly sessionTitle?: string;
+  /** Basename of the session's working directory. */
+  readonly project?: string;
+  readonly updatedAt: string;
 }
 
 /**
@@ -157,4 +182,20 @@ export interface ClaudeTurnHookInput {
   readonly hook_event_name: "Stop" | "UserPromptSubmit" | "SessionEnd";
   readonly last_assistant_message?: string;
   readonly session_title?: string;
+  /** The submitted prompt on UserPromptSubmit; shown as an activity step. */
+  readonly prompt?: string;
+}
+
+/**
+ * Body for `POST /v1/providers/{provider}/activity`. Notify-only: the bridge
+ * answers right away and never returns a hook decision. Adapters send only
+ * the short string fields of `tool_input` the step label needs.
+ */
+export interface ActivityHookInput {
+  readonly session_id: string;
+  readonly cwd?: string;
+  readonly session_title?: string;
+  readonly hook_event_name: "SessionStart" | "PreToolUse" | "PostToolUseFailure";
+  readonly tool_name?: string;
+  readonly tool_input?: Readonly<Record<string, unknown>>;
 }
