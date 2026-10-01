@@ -16,7 +16,7 @@ This is a pnpm workspace with two packages:
 
 | Path | What it is |
 | --- | --- |
-| `packages/omarchy-bridge/` | A TypeScript npm package. Embeds a thin slice of the T3 Code orchestration layer and exposes a localhost HTTP surface (`GET /v1/pending`, `POST /v1/respond`, `GET /v1/stream`). Published to npm as `@agent-fold/bridge`. |
+| `packages/omarchy-bridge/` | A TypeScript npm package. Embeds a thin slice of the T3 Code orchestration layer and exposes a localhost HTTP surface (`GET /v1/pending`, `POST /v1/respond`, `GET /v1/stream`). Published to npm as `@thisisayande/agent-fold`. |
 | `packages/bell-plugin/` | The Omarchy plugin itself: `manifest.json`, `BarWidget.qml`, `Panel.qml`, `bridge.mjs`. The QML plugin loads `bridge.mjs`, which talks to the bridge daemon over HTTP. Distributed as a folder consumable by `omarchy plugin add`. |
 
 ## Status
@@ -33,7 +33,7 @@ and API rather than an installable end-to-end plugin.
 agent-fold/
 ├── packages/
 │   ├── omarchy-bridge/   # TS, Effect-based, embeds ProjectionPipeline + adapters
-│   └── bell-plugin/      # QML + manifest.json, depends on @agent-fold/bridge
+│   └── bell-plugin/      # QML + manifest.json, depends on @thisisayande/agent-fold
 ├── pnpm-workspace.yaml
 ├── package.json
 ├── tsconfig.base.json

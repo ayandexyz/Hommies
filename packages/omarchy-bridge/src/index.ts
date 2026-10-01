@@ -1,5 +1,5 @@
 /**
- * @agent-fold/bridge public API.
+ * @thisisayande/agent-fold public API.
  *
  * The QML plugin only consumes `startBridgeServer`. Everything else is re-exported
  * here so future callers (CLI, dev tooling) can use the same primitives.

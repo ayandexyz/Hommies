@@ -1,4 +1,4 @@
-# @agent-fold/bridge
+# @thisisayande/agent-fold
 
 Localhost HTTP bridge that surfaces pending coding-agent questions and permissions
 to the agent-fold Omarchy plugin.
@@ -9,7 +9,7 @@ client of a separately running T3 Code server; it is the server.
 ## API
 
 ```ts
-import { startBridgeServer } from "@agent-fold/bridge";
+import { startBridgeServer } from "@thisisayande/agent-fold";
 
 await startBridgeServer({
   dataDir: "/home/me/.local/share/agent-fold",
@@ -30,6 +30,35 @@ The server binds to `127.0.0.1` only. Routes:
 The HTTP surface is the contract with the QML plugin; do not break it without a
 versioned path (`/v2/...`).
 
+## Setup
+
+Install the package, then let `agent-fold setup` register the hooks for every
+agent it finds (Claude Code in `~/.claude`, Codex in `~/.codex`, OpenCode in
+`~/.config/opencode`):
+
+```sh
+npm install -g @thisisayande/agent-fold
+agent-fold setup --dry-run   # preview
+agent-fold setup
+```
+
+Setup merges into the existing configs: your other hooks and plugins are kept,
+re-running it replaces stale agent-fold paths instead of duplicating them, and
+every file it changes is first backed up as `<file>.agent-fold-backup-<time>`.
+It respects `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, and `XDG_CONFIG_HOME`, writes
+through symlinked dotfiles, and leaves unparseable files and OpenCode's
+`opencode.jsonc` untouched (register those by hand as described below). Limit it
+with `--only claude,codex,opencode`.
+
+To remove everything setup added:
+
+```sh
+agent-fold uninstall
+npm uninstall -g @thisisayande/agent-fold
+```
+
+The sections below document the entries setup writes, for manual installs.
+
 ## Claude Code integration
 
 The first provider integration uses Claude Code's `PermissionRequest` command
@@ -38,25 +67,25 @@ hook. It forwards the tool request to the local bridge and waits for an
 is not running, the hook produces no decision, so Claude Code keeps its normal
 terminal permission prompt.
 
-After installing `@agent-fold/bridge`, add this hook to `~/.claude/settings.json`
+After installing `@thisisayande/agent-fold`, add this hook to `~/.claude/settings.json`
 (replace the command with the absolute path to the installed package's
 `dist/claude-hook.js`):
 
 ```json
 {
   "hooks": {
-    "PreToolUse": [{ "matcher": "AskUserQuestion", "hooks": [{ "type": "command", "command": "node /absolute/path/to/@agent-fold/bridge/dist/claude-hook.js" }] }],
-    "PostToolUse": [{ "matcher": "AskUserQuestion", "hooks": [{ "type": "command", "command": "node /absolute/path/to/@agent-fold/bridge/dist/claude-hook.js" }] }],
-    "PostToolUseFailure": [{ "matcher": "AskUserQuestion", "hooks": [{ "type": "command", "command": "node /absolute/path/to/@agent-fold/bridge/dist/claude-hook.js" }] }],
-    "Stop": [{ "hooks": [{ "type": "command", "command": "node /absolute/path/to/@agent-fold/bridge/dist/claude-hook.js", "timeout": 5 }] }],
-    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "node /absolute/path/to/@agent-fold/bridge/dist/claude-hook.js", "timeout": 5 }] }],
-    "SessionEnd": [{ "hooks": [{ "type": "command", "command": "node /absolute/path/to/@agent-fold/bridge/dist/claude-hook.js", "timeout": 5 }] }],
+    "PreToolUse": [{ "matcher": "AskUserQuestion", "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/agent-fold/dist/claude-hook.js" }] }],
+    "PostToolUse": [{ "matcher": "AskUserQuestion", "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/agent-fold/dist/claude-hook.js" }] }],
+    "PostToolUseFailure": [{ "matcher": "AskUserQuestion", "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/agent-fold/dist/claude-hook.js" }] }],
+    "Stop": [{ "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/agent-fold/dist/claude-hook.js", "timeout": 5 }] }],
+    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/agent-fold/dist/claude-hook.js", "timeout": 5 }] }],
+    "SessionEnd": [{ "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/agent-fold/dist/claude-hook.js", "timeout": 5 }] }],
     "PermissionRequest": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "node /absolute/path/to/@agent-fold/bridge/dist/claude-hook.js",
+            "command": "node /absolute/path/to/@thisisayande/agent-fold/dist/claude-hook.js",
             "timeout": 305
           }
         ]
@@ -124,11 +153,11 @@ groups:
 {
   "hooks": {
     "PermissionRequest": [
-      { "matcher": "*", "hooks": [{ "type": "command", "command": "node /absolute/path/to/@agent-fold/bridge/dist/codex-hook.js", "timeout": 305 }] }
+      { "matcher": "*", "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/agent-fold/dist/codex-hook.js", "timeout": 305 }] }
     ],
-    "Stop": [{ "hooks": [{ "type": "command", "command": "node /absolute/path/to/@agent-fold/bridge/dist/codex-hook.js", "timeout": 5 }] }],
-    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "node /absolute/path/to/@agent-fold/bridge/dist/codex-hook.js", "timeout": 5 }] }],
-    "SessionEnd": [{ "hooks": [{ "type": "command", "command": "node /absolute/path/to/@agent-fold/bridge/dist/codex-hook.js", "timeout": 5 }] }]
+    "Stop": [{ "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/agent-fold/dist/codex-hook.js", "timeout": 5 }] }],
+    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/agent-fold/dist/codex-hook.js", "timeout": 5 }] }],
+    "SessionEnd": [{ "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/agent-fold/dist/codex-hook.js", "timeout": 5 }] }]
   }
 }
 ```
@@ -166,7 +195,7 @@ plugins you already have:
 
 ```json
 {
-  "plugin": ["file:///absolute/path/to/@agent-fold/bridge/dist/opencode-plugin.js"]
+  "plugin": ["file:///absolute/path/to/@thisisayande/agent-fold/dist/opencode-plugin.js"]
 }
 ```
 

@@ -4,7 +4,7 @@
 
 pnpm workspace monorepo with two packages.
 
-- `packages/omarchy-bridge/` — `@agent-fold/bridge` (npm). TypeScript + Effect.
+- `packages/omarchy-bridge/` — `@thisisayande/agent-fold` (npm). TypeScript + Effect.
   A localhost HTTP daemon (`startBridgeServer` in `src/server.ts`) plus four
   provider adapters that feed it:
   - Claude Code: blocking command hooks (`src/claude-hook.ts`, bin `agent-fold-claude-hook`).
@@ -50,9 +50,9 @@ bridge emits via its own `packages/omarchy-bridge/tsconfig.json`.
 Single-package verification:
 
 ```sh
-pnpm --filter @agent-fold/bridge build
-pnpm --filter @agent-fold/bridge typecheck
-pnpm --filter @agent-fold/bridge test
+pnpm --filter @thisisayande/agent-fold build
+pnpm --filter @thisisayande/agent-fold typecheck
+pnpm --filter @thisisayande/agent-fold test
 ```
 
 Validate QML against the installed Omarchy shell:
@@ -152,7 +152,7 @@ exercise the HTTP surface end-to-end:
   <this-repo>#path:packages/bell-plugin --enable` install described in the
   README is the target, not a working command yet.
 - `Service.qml` calls `agent-fold-bridge` directly from `$PATH`; the
-  bridge must be installed via `npm i -g @agent-fold/bridge` for the
+  bridge must be installed via `npm i -g @thisisayande/agent-fold` for the
   plugin to find it (or via Omarchy's plugin runtime that resolves the
   npm-installed copy).
 - `docs/plan.md` does not exist; the extraction plan lives in this file.

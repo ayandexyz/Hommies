@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 /** Command-hook adapter for Codex permission requests and turn ends. */
 import { isTurnEvent, postToBridge, readConnection, readStdin, reportTurn, type TurnHookEvent } from "./hook-common.js";
 import { lastCodexAssistantText, readCodexSessionTitle } from "./codex-transcript.js";

@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 /** Command-hook adapter for Claude Code questions, permissions, and turn ends. */
 import { isTurnEvent, postToBridge, readConnection, readStdin, reportTurn, type TurnHookEvent } from "./hook-common.js";
 import { lastAssistantText } from "./stop-detection.js";

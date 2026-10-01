@@ -1,6 +1,6 @@
 # agent-fold bell plugin
 
-The Omarchy plugin half of `agent-fold`. The other half — `@agent-fold/bridge` —
+The Omarchy plugin half of `agent-fold`. The other half — `@thisisayande/agent-fold` —
 runs the daemon this plugin talks to.
 
 ## Files

@@ -1,12 +1,31 @@
 {
-  "name": "@agent-fold/bridge",
+  "name": "@thisisayande/agent-fold",
   "version": "0.0.0",
   "description": "Localhost HTTP bridge that exposes pending coding-agent questions and permissions to the agent-fold Omarchy plugin.",
   "license": "MIT",
+  "author": "Ayan De",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ayandexyz/agent-fold.git",
+    "directory": "packages/omarchy-bridge"
+  },
+  "homepage": "https://github.com/ayandexyz/agent-fold#readme",
+  "bugs": {
+    "url": "https://github.com/ayandexyz/agent-fold/issues"
+  },
+  "keywords": [
+    "omarchy",
+    "claude-code",
+    "codex",
+    "opencode",
+    "hooks",
+    "agent"
+  ],
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
+    "agent-fold": "./dist/cli.js",
     "agent-fold-bridge": "./dist/runtime.js",
     "agent-fold-claude-hook": "./dist/claude-hook.js",
     "agent-fold-codex-hook": "./dist/codex-hook.js"
@@ -33,12 +52,13 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "pnpm run build && node --test test/*.test.mjs",
     "lint": "echo 'lint not configured yet' && exit 0",
-    "clean": "rm -rf dist *.tsbuildinfo"
+    "clean": "rm -rf dist *.tsbuildinfo",
+    "prepublishOnly": "pnpm test"
   },
   "dependencies": {
     "effect": "^3.10.0"
   },
-  "//": "TODO: add @t3tools/contracts and the extracted server-core package once they are publishable on npm. Until then, types.ts and server.ts use locally-declared structural types — see TODO in types.ts.",
+  "//": "TODO: add @t3tools/contracts and the extracted server-core package once they are publishable on npm. Until then, types.ts and server.ts use locally-declared structural types \u2014 see TODO in types.ts.",
   "devDependencies": {
     "@types/node": "^20.14.0",
     "typescript": "^5.6.3"
