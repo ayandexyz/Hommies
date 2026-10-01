@@ -88,8 +88,11 @@ export interface TurnSources {
  * the user and never write to stdout, because UserPromptSubmit stdout would be
  * injected into the agent's context.
  */
+/** `/v1/providers/<provider>` for built-in agents, `/v1/agents/<name>` for custom ones. */
+export type BridgeRoute = string;
+
 export async function reportTurn(
-  provider: "claude" | "codex",
+  route: BridgeRoute,
   event: TurnHookEvent,
   connection: BridgeConnection,
   sources: TurnSources,
@@ -110,7 +113,7 @@ export async function reportTurn(
     const sessionTitle = await sources.sessionTitle(event);
     body = { ...body, last_assistant_message: message, ...(sessionTitle === null ? {} : { session_title: sessionTitle }) };
   }
-  const path = `/v1/providers/${provider}/${event.hook_event_name === "Stop" ? "stop" : "resume"}`;
+  const path = `${route}/${event.hook_event_name === "Stop" ? "stop" : "resume"}`;
   try {
     await postToBridge(connection, path, JSON.stringify(body), 2_000);
   } catch {
@@ -120,7 +123,7 @@ export async function reportTurn(
 
 /** Reports a failed turn. Notify-only and never writes to stdout. */
 export async function reportFailure(
-  provider: "claude" | "codex",
+  route: BridgeRoute,
   event: FailureHookEvent,
   connection: BridgeConnection,
   sessionTitle: string | null,
@@ -136,7 +139,7 @@ export async function reportFailure(
     ...await agentProcess(),
   };
   try {
-    await postToBridge(connection, `/v1/providers/${provider}/failure`, JSON.stringify(body), 2_000);
+    await postToBridge(connection, `${route}/failure`, JSON.stringify(body), 2_000);
   } catch {
     // Best-effort, like the other turn hooks.
   }
@@ -148,7 +151,7 @@ export async function reportFailure(
  * stdout would be added to the agent's context; PreToolUse stdout is a decision).
  */
 export async function reportActivity(
-  provider: "claude" | "codex",
+  route: BridgeRoute,
   event: ActivityHookEvent,
   connection: BridgeConnection,
 ): Promise<void> {
@@ -166,7 +169,7 @@ export async function reportActivity(
     ...await agentProcess(),
   };
   try {
-    await postToBridge(connection, `/v1/providers/${provider}/activity`, JSON.stringify(body), 1_000);
+    await postToBridge(connection, `${route}/activity`, JSON.stringify(body), 1_000);
   } catch {
     // Activity is best-effort; never delay the agent.
   }

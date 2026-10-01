@@ -16,15 +16,15 @@ async function main(): Promise<void> {
   const connection = await readConnection();
   if (connection === null) return;
   if (isActivityEvent(event)) {
-    await reportActivity("claude", event, connection);
+    await reportActivity("/v1/providers/claude", event, connection);
     return;
   }
   if (event.hook_event_name === "StopFailure") {
-    await reportFailure("claude", event, connection, await readSessionTitle(event.transcript_path ?? undefined));
+    await reportFailure("/v1/providers/claude", event, connection, await readSessionTitle(event.transcript_path ?? undefined));
     return;
   }
   if (isTurnEvent(event.hook_event_name)) {
-    await reportTurn("claude", event, connection, {
+    await reportTurn("/v1/providers/claude", event, connection, {
       lastAssistantText: async ({ transcript_path }) => {
         const tail = await readTranscriptTail(transcript_path ?? undefined);
         return tail === null ? null : lastAssistantText(tail);

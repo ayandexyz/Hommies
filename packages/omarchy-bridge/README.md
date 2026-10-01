@@ -26,6 +26,7 @@ The server binds to `127.0.0.1` only. Routes:
 | `POST` | `/v1/respond` | Dispatch a user response to an open question or permission request, or dismiss an `attention` item. |
 | `POST` | `/v1/providers/{provider}/failure` | Notify-only: a turn ended on an API error or a usage limit (see [Errors and rate limits](#errors-and-rate-limits)). |
 | `POST` | `/v1/providers/{provider}/activity` | Notify-only: a session started, ran a tool, or a tool failed (see [Live activity](#live-activity)). |
+| `POST` | `/v1/agents/{name}/{activity,stop,resume,failure}` | The same notify-only routes for a custom agent (see [Custom agents](#custom-agents)). |
 | `POST` | `/v1/focus` | Focus the Hyprland window a session runs in (see [Jump to the terminal](#jump-to-the-terminal)). |
 | `POST` | `/v1/preferences` | Select whether the top bar or the agent's CLI owns question answers, and toggle desktop notifications. |
 | `GET` | `/healthz` | Liveness probe. |
@@ -221,6 +222,45 @@ Adapters post to `/v1/providers/{provider}/failure`:
 ```
 
 Older plugin copies ignore `failure` and show these as plain attention items.
+
+## Custom agents
+
+Any agent that can run a command hook can show up in the bar without its own
+adapter. Point its hooks at `agent-fold-hook --agent <name>`; it reads
+Claude-style hook JSON on stdin and reports to `/v1/agents/<name>/...`:
+
+```json
+{
+  "hooks": {
+    "SessionStart": [{ "hooks": [{ "type": "command", "command": "agent-fold-hook --agent my-tool", "timeout": 5 }] }],
+    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "agent-fold-hook --agent my-tool", "timeout": 5 }] }],
+    "PreToolUse": [{ "matcher": "*", "hooks": [{ "type": "command", "command": "agent-fold-hook --agent my-tool", "timeout": 5 }] }],
+    "Stop": [{ "hooks": [{ "type": "command", "command": "agent-fold-hook --agent my-tool", "timeout": 5 }] }],
+    "SessionEnd": [{ "hooks": [{ "type": "command", "command": "agent-fold-hook --agent my-tool", "timeout": 5 }] }]
+  }
+}
+```
+
+- The name comes from `--agent`, then `$AGENT_FOLD_AGENT`, then an `agent`
+  field in the payload. It must be 1-24 lowercase letters, digits, or hyphens,
+  and not `claude`, `codex`, `opencode`, `omacode`, `cursor`, `grok`, or
+  `antigravity`, so a custom agent cannot pose as a built-in one. Invalid
+  names are dropped by the hook and rejected by the bridge with `400`; such
+  events never reach a built-in provider.
+- Supported: live activity (`SessionStart`, `PreToolUse`,
+  `PostToolUseFailure`), turn ends (`UserPromptSubmit`, `Stop`, `SessionEnd`),
+  and failures (`StopFailure`). A `Stop` without `last_assistant_message`
+  shows as "Turn finished." Pass `session_title` to name the session.
+- **Permission requests are not answered from the bar yet**: the hook writes
+  nothing, so the agent asks in its own terminal.
+- Custom agents are listed under an **Other** tab, labelled with their name.
+
+Quick test with the bridge running:
+
+```sh
+echo '{"hook_event_name":"UserPromptSubmit","session_id":"t1","cwd":"'"$PWD"'","prompt":"hello"}' \
+  | agent-fold-hook --agent demo
+```
 
 ## Always allow
 

@@ -3,7 +3,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { randomBytes, randomUUID } from "node:crypto";
 
-import { ApprovalRequestId, ThreadId } from "./localContracts.js";
+import { ApprovalRequestId, ThreadId, type ProviderDriverKind } from "./localContracts.js";
 import type {
   ActivityHookInput,
   AgentProcessFields,
@@ -25,6 +25,7 @@ import type {
   SessionFailureKind,
 } from "./types.js";
 import { detectReplyRequest, summarizeFinishedTurn } from "./stop-detection.js";
+import { isValidAgentName } from "./agent-name.js";
 import { focusHyprlandWindow, validTmux, type FocusWindow } from "./focus.js";
 import type { BridgeNotifier } from "./notifier.js";
 
@@ -77,7 +78,23 @@ interface PendingQuestion {
   readonly timer: ReturnType<typeof setTimeout>;
 }
 
-type Provider = "claude" | "codex" | "opencode" | "omacode";
+type BuiltInProvider = "claude" | "codex" | "opencode" | "omacode";
+const builtInProviders: ReadonlyArray<BuiltInProvider> = ["claude", "codex", "opencode", "omacode"];
+
+declare const customAgentBrand: unique symbol;
+/** A validated custom agent name; only `customAgentName` creates one. */
+type NamedDriverKind = "claude" | "codex" | "opencode" | "omacode" | "cursor" | "grok" | "antigravity";
+type CustomAgent = Exclude<ProviderDriverKind, NamedDriverKind> & { readonly [customAgentBrand]: true };
+type Provider = BuiltInProvider | CustomAgent;
+
+/** A custom agent name from `/v1/agents/{name}/...`, or `null` when it is not valid. */
+function customAgentName(raw: string): CustomAgent | null {
+  return isValidAgentName(raw) ? raw as CustomAgent : null;
+}
+
+function isBuiltIn(provider: string): provider is BuiltInProvider {
+  return (builtInProviders as ReadonlyArray<string>).includes(provider);
+}
 
 /**
  * Agents whose integration runs in-process (OpenCode's plugin, Omacode's
@@ -91,20 +108,22 @@ function hasRequestIds(provider: Provider): provider is RequestIdProvider {
 }
 
 /** `agent` names notifications and panel hints; `thread` prefixes `PendingResponse` thread titles. */
-const providerLabels: Record<Provider, { readonly agent: string; readonly thread: string }> = {
+const providerLabels: Record<BuiltInProvider, { readonly agent: string; readonly thread: string }> = {
   claude: { agent: "Claude", thread: "Claude Code" },
   codex: { agent: "Codex", thread: "Codex" },
   opencode: { agent: "OpenCode", thread: "OpenCode" },
   omacode: { agent: "Omacode", thread: "Omacode" },
 };
 
+/** Custom agents are labelled with their own name. */
+function labelsFor(provider: Provider): { readonly agent: string; readonly thread: string } {
+  return isBuiltIn(provider) ? providerLabels[provider] : { agent: provider, thread: provider };
+}
+
 function providerOf(item: PendingItem): Provider {
-  switch (item.provider) {
-    case "codex": return "codex";
-    case "opencode": return "opencode";
-    case "omacode": return "omacode";
-    default: return "claude";
-  }
+  const provider = String(item.provider);
+  if (isBuiltIn(provider)) return provider;
+  return customAgentName(provider) ?? "claude";
 }
 
 interface TrackedSession {
@@ -230,6 +249,17 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       const provider = turn[1] as Provider;
       const input = await readJson<ClaudeTurnHookInput>(request);
       return turn[2] === "stop" ? receiveStop(response, input, provider, state) : receiveResume(response, input, provider, state);
+    }
+    const agent = /^\/v1\/agents\/([^/]+)\/(activity|stop|resume|failure)$/.exec(url.pathname);
+    if (request.method === "POST" && agent) {
+      const name = customAgentName(decodeURIComponent(agent[1] ?? ""));
+      if (name === null) return sendJson(response, 400, { error: "agent names are 1-24 lowercase letters, digits, or hyphens, and not a built-in provider" });
+      switch (agent[2]) {
+        case "activity": return receiveActivity(response, await readJson<ActivityHookInput>(request), name, state);
+        case "failure": return receiveFailure(response, await readJson<FailureHookInput>(request), name, state);
+        case "stop": return receiveStop(response, await readJson<ClaudeTurnHookInput>(request), name, state);
+        default: return receiveResume(response, await readJson<ClaudeTurnHookInput>(request), name, state);
+      }
     }
     const failure = /^\/v1\/providers\/(claude|codex|opencode|omacode)\/failure$/.exec(url.pathname);
     if (request.method === "POST" && failure) {
@@ -431,7 +461,7 @@ async function receiveQuestion(response: ServerResponse, input: ClaudeQuestionHo
     const questions = parseQuestions(input.tool_input);
     const item: PendingItem = {
       id, threadId: ThreadId(input.session_id), provider, kind: "question",
-      summary: questions[0]?.question ?? `${providerLabels[provider].agent} needs your input`,
+      summary: questions[0]?.question ?? `${labelsFor(provider).agent} needs your input`,
       createdAt: new Date().toISOString(), questions,
       answerSurface: state.questionAnswerSurface,
     };
@@ -606,7 +636,7 @@ const failureHeadings: Record<SessionFailureKind, string> = {
 /** Sends one desktop notification per new item; a session's newer item replaces its older one. */
 function announce(state: BridgeState, item: PendingItem | undefined, cwd: string | undefined, sessionTitle: string | undefined): void {
   if (!item || !state.notify || !state.desktopNotifications) return;
-  const agent = providerLabels[providerOf(item)].agent;
+  const agent = labelsFor(providerOf(item)).agent;
   const name = sessionTitle || (cwd ? basename(cwd) || cwd : undefined);
   try {
     state.notify({
@@ -711,7 +741,7 @@ function respond(response: ServerResponse, input: PendingResponseInput, state: B
   const question = state.questions.get(input.requestId);
   if (question && question.item.threadId === input.threadId) {
     if (question.answerSurface !== "topbar" || !question.resolve) {
-      return sendJson(response, 409, { error: `this question must be answered in ${providerLabels[question.provider].agent}` });
+      return sendJson(response, 409, { error: `this question must be answered in ${labelsFor(question.provider).agent}` });
     }
     if (!input.answers || typeof input.answers !== "object") return sendJson(response, 400, { error: "a question answer is required" });
     const answers = normalizeAnswers(question.item.questions ?? [], input.answers);
@@ -746,11 +776,11 @@ function snapshot(state: BridgeState): PendingResponse {
     threads.set(item.threadId, sessionTitle ? { ...thread, sessionTitle } : thread);
   };
   for (const { item, hookInput, provider } of state.pending.values()) {
-    add(item, providerLabels[provider].thread, hookInput.cwd, hookInput.session_title);
+    add(item, labelsFor(provider).thread, hookInput.cwd, hookInput.session_title);
   }
-  for (const { item, provider, input } of state.questions.values()) add(item, providerLabels[provider].thread, input.cwd, input.session_title);
+  for (const { item, provider, input } of state.questions.values()) add(item, labelsFor(provider).thread, input.cwd, input.session_title);
   for (const { item, cwd, sessionTitle } of state.attention.values()) {
-    add(item, providerLabels[providerOf(item)].thread, cwd, sessionTitle);
+    add(item, labelsFor(providerOf(item)).thread, cwd, sessionTitle);
   }
   return {
     totalCount: state.pending.size + state.questions.size + state.attention.size,

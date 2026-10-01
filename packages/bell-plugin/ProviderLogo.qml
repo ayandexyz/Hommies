@@ -44,7 +44,8 @@ Item {
     anchors.centerIn: parent
     visible: !root.logoReady
     text: root.providerId === "claude" ? "C" : root.providerId === "codex" ? "O"
-      : root.providerId === "opencode" ? "OC" : root.providerId === "omacode" ? "OM" : "?"
+      : root.providerId === "opencode" ? "OC" : root.providerId === "omacode" ? "OM"
+      : root.providerId === "other" ? "+" : "?"
     color: root.tint
     font.family: root.fontFamily
     font.pixelSize: Style.font.caption

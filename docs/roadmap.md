@@ -150,6 +150,11 @@ stops the same rule from asking again.
 
 ## 5. Generic agent route
 
+**Status: done.** See "Custom agents" in `packages/omarchy-bridge/README.md`.
+Custom agents use their own `/v1/agents/{name}/...` routes rather than a
+`custom` provider, and are shown under an "Other" tab. The planned
+`cursor`, `grok`, and `antigravity` names are reserved too.
+
 **Goal:** let any tool that can run a command hook show up in the bar without
 a dedicated adapter.
 

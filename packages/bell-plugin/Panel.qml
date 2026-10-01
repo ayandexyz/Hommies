@@ -19,6 +19,8 @@ import "bridge.js" as Bridge
  * latest steps, even when nothing needs an answer (`snapshot.sessions`).
  * An `attention` item with `failure` set means the turn stopped on an API
  * error or a rate limit; it renders red or orange and is dismissed the same way.
+ * Custom agents (`agent-fold-hook --agent <name>`) share the "Other" tab,
+ * which only appears while one of them is listed.
  * "Go to terminal" focuses the Hyprland window the session runs in, when the
  * adapter sent the agent's process ancestry (`activity.focusable`).
  *
@@ -162,14 +164,28 @@ Panel {
 
   onSelectedProviderChanged: selectedThreadId = ""
 
+  readonly property var builtInProviders: ["claude", "codex", "opencode", "omacode"]
+
+  function isBuiltIn(provider) {
+    return builtInProviders.indexOf(String(provider)) >= 0
+  }
+
+  /** Whether an item or session from `provider` belongs on the `tab` ("other" holds every custom agent). */
+  function onTab(provider, tab) {
+    return tab === "other" ? !isBuiltIn(provider) : provider === tab
+  }
+
   function providerName(provider) {
     return provider === "codex" ? "Codex" : provider === "opencode" ? "OpenCode"
-      : provider === "omacode" ? "Omacode" : "Claude"
+      : provider === "omacode" ? "Omacode" : provider === "other" ? "Other"
+      : provider === "claude" ? "Claude" : String(provider || "Agent")
   }
 
   function agentName(item) {
     return providerName(item ? item.provider : "")
   }
+
+  readonly property bool showOtherTab: providerCount("other") > 0 || sessionActivity("other").length > 0
 
   function sessionProject(thread) {
     if (thread.project) return String(thread.project)
@@ -182,8 +198,9 @@ Panel {
   // The agent's own session title names the session; the folder is the fallback,
   // with a short id so two untitled sessions in one folder stay distinct.
   function sessionLabel(thread) {
-    if (thread.sessionTitle) return String(thread.sessionTitle)
-    return sessionProject(thread) + "  \u00b7  " + String(thread.threadId).slice(0, 8)
+    var prefix = thread.agent ? String(thread.agent) + "  \u00b7  " : ""
+    if (thread.sessionTitle) return prefix + String(thread.sessionTitle)
+    return prefix + sessionProject(thread) + "  \u00b7  " + String(thread.threadId).slice(0, 8)
   }
 
   function latestStep(thread) {
@@ -237,7 +254,7 @@ Panel {
     var sessions = hostWidget && hostWidget.snapshot && hostWidget.snapshot.sessions ? hostWidget.snapshot.sessions : []
     var result = []
     for (var index = 0; index < sessions.length; index++) {
-      if (sessions[index].provider === provider) result.push(sessions[index])
+      if (onTab(sessions[index].provider, provider)) result.push(sessions[index])
     }
     return result
   }
@@ -248,7 +265,7 @@ Panel {
     for (var threadIndex = 0; threadIndex < threads.length; threadIndex++) {
       var items = threads[threadIndex].items || []
       for (var itemIndex = 0; itemIndex < items.length; itemIndex++) {
-        if (items[itemIndex].provider === provider) count++
+        if (onTab(items[itemIndex].provider, provider)) count++
       }
     }
     return count
@@ -297,7 +314,7 @@ Panel {
       var thread = threads[threadIndex]
       var items = []
       for (var itemIndex = 0; itemIndex < thread.items.length; itemIndex++) {
-        if (thread.items[itemIndex].provider === provider) items.push(thread.items[itemIndex])
+        if (onTab(thread.items[itemIndex].provider, provider)) items.push(thread.items[itemIndex])
       }
       if (items.length > 0) {
         var entry = {
@@ -306,7 +323,8 @@ Panel {
           sessionTitle: thread.sessionTitle,
           project: thread.project,
           items: items,
-          activity: null
+          activity: null,
+          agent: provider === "other" ? items[0].provider : ""
         }
         byId[thread.threadId] = entry
         result.push(entry)
@@ -327,7 +345,8 @@ Panel {
           sessionTitle: session.sessionTitle,
           project: session.project,
           items: [],
-          activity: session
+          activity: session,
+          agent: provider === "other" ? session.provider : ""
         })
       }
     }
@@ -360,7 +379,7 @@ Panel {
     // Keep ordinary prompts compact (wide enough for the four provider tabs),
     // then grow quickly enough for long option labels. KeyboardPanel still
     // clamps the result to the monitor width.
-    var width = 540 + Math.max(0, longest - 80) * 5
+    var width = (showOtherTab ? 620 : 540) + Math.max(0, longest - 80) * 5
     return Style.space(Math.min(760, width))
   }
 
@@ -468,7 +487,8 @@ Panel {
           width: parent.width
           spacing: Style.space(8)
 
-          readonly property real tabWidth: (width - spacing * 3) / 4
+          readonly property int tabCount: root.showOtherTab ? 5 : 4
+          readonly property real tabWidth: (width - spacing * (tabCount - 1)) / tabCount
 
           ProviderTab {
             width: providerTabs.tabWidth
@@ -520,6 +540,20 @@ Panel {
             fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
             fontSize: Style.font.body
             onClicked: { root.selectedProvider = "omacode"; root.selectedThreadId = "" }
+          }
+
+          ProviderTab {
+            visible: root.showOtherTab
+            width: providerTabs.tabWidth
+            providerId: "other"
+            providerName: "Other"
+            pendingCount: root.providerCount("other")
+            selected: root.selectedProvider === "other"
+            bordered: true
+            foreground: root.barForeground
+            fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+            fontSize: Style.font.body
+            onClicked: { root.selectedProvider = "other"; root.selectedThreadId = "" }
           }
         }
 

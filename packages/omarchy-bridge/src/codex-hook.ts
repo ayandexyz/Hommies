@@ -13,11 +13,11 @@ async function main(): Promise<void> {
   const connection = await readConnection();
   if (connection === null) return;
   if (isActivityEvent(event)) {
-    await reportActivity("codex", event, connection);
+    await reportActivity("/v1/providers/codex", event, connection);
     return;
   }
   if (isTurnEvent(event.hook_event_name)) {
-    await reportTurn("codex", event, connection, {
+    await reportTurn("/v1/providers/codex", event, connection, {
       lastAssistantText: async ({ transcript_path }) => {
         const tail = await readTranscriptTail(transcript_path ?? undefined);
         return tail === null ? null : lastCodexAssistantText(tail);

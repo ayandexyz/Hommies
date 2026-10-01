@@ -28,7 +28,8 @@
     "agent-fold": "./dist/cli.js",
     "agent-fold-bridge": "./dist/runtime.js",
     "agent-fold-claude-hook": "./dist/claude-hook.js",
-    "agent-fold-codex-hook": "./dist/codex-hook.js"
+    "agent-fold-codex-hook": "./dist/codex-hook.js",
+    "agent-fold-hook": "./dist/agent-hook.js"
   },
   "exports": {
     ".": {
