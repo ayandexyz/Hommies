@@ -28,6 +28,7 @@ import { detectReplyRequest, summarizeFinishedTurn } from "./stop-detection.js";
 import { isValidAgentName } from "./agent-name.js";
 import { focusHyprlandWindow, validTmux, type FocusWindow } from "./focus.js";
 import type { BridgeNotifier } from "./notifier.js";
+import type { BridgeSound, BridgeSoundPlayer } from "./sound.js";
 
 const responseTimeoutMs = 5 * 60 * 1000;
 /** Turn-end items outlive hook timeouts, but not an abandoned session. */
@@ -65,10 +66,12 @@ interface BridgeState {
   readonly sessions: Map<string, TrackedSession>;
   readonly streams: Set<ServerResponse>;
   readonly notify: BridgeNotifier | undefined;
+  readonly playSound: BridgeSoundPlayer | undefined;
   readonly focusWindow: FocusWindow;
   hooksOutdated: ReadonlyArray<string>;
   questionAnswerSurface: QuestionAnswerSurface;
   desktopNotifications: boolean;
+  sounds: boolean;
 }
 
 interface PendingQuestion {
@@ -165,10 +168,12 @@ export async function startBridgeServer(
     sessions: new Map(),
     streams: new Set(),
     notify: options.notify,
+    playSound: options.playSound,
     focusWindow: options.focusWindow ?? focusHyprlandWindow,
     hooksOutdated: [],
     questionAnswerSurface: "topbar",
     desktopNotifications: true,
+    sounds: false,
   };
   const server = createServer((request, response) => { void handleRequest(request, response, state); });
   await new Promise<void>((resolve, reject) => {
@@ -624,8 +629,9 @@ async function focus(response: ServerResponse, input: FocusInput, state: BridgeS
 function updatePreferences(response: ServerResponse, input: BridgePreferencesInput, state: BridgeState): void {
   const surface = input?.questionAnswerSurface;
   const notifications = input?.desktopNotifications;
-  if (surface === undefined && notifications === undefined) {
-    return sendJson(response, 400, { error: "questionAnswerSurface or desktopNotifications is required" });
+  const sounds = input?.sounds;
+  if (surface === undefined && notifications === undefined && sounds === undefined) {
+    return sendJson(response, 400, { error: "questionAnswerSurface, desktopNotifications, or sounds is required" });
   }
   if (surface !== undefined && surface !== "topbar" && surface !== "cli") {
     return sendJson(response, 400, { error: "questionAnswerSurface must be topbar or cli" });
@@ -633,10 +639,15 @@ function updatePreferences(response: ServerResponse, input: BridgePreferencesInp
   if (notifications !== undefined && typeof notifications !== "boolean") {
     return sendJson(response, 400, { error: "desktopNotifications must be a boolean" });
   }
+  if (sounds !== undefined && typeof sounds !== "boolean") return sendJson(response, 400, { error: "sounds must be a boolean" });
   if (surface !== undefined) state.questionAnswerSurface = surface;
   if (notifications !== undefined) state.desktopNotifications = notifications;
+  if (sounds !== undefined) state.sounds = sounds;
   return sendJson(response, 200, {
-    ok: true, questionAnswerSurface: state.questionAnswerSurface, desktopNotifications: state.desktopNotifications,
+    ok: true,
+    questionAnswerSurface: state.questionAnswerSurface,
+    desktopNotifications: state.desktopNotifications,
+    sounds: state.sounds,
   });
 }
 
@@ -652,9 +663,24 @@ const failureHeadings: Record<SessionFailureKind, string> = {
   ratelimit: "Rate limited",
 };
 
-/** Sends one desktop notification per new item; a session's newer item replaces its older one. */
+function soundFor(item: PendingItem): BridgeSound {
+  return item.failure === "error" ? "error" : item.kind === "finished" ? "finished" : "attention";
+}
+
+/**
+ * Plays a sound (when on) and sends one desktop notification per new item; a
+ * session's newer notification replaces its older one.
+ */
 function announce(state: BridgeState, item: PendingItem | undefined, cwd: string | undefined, sessionTitle: string | undefined): void {
-  if (!item || !state.notify || !state.desktopNotifications) return;
+  if (!item) return;
+  if (state.sounds && state.playSound) {
+    try {
+      state.playSound(soundFor(item));
+    } catch {
+      // A broken player must not break the hook response.
+    }
+  }
+  if (!state.notify || !state.desktopNotifications) return;
   const agent = labelsFor(providerOf(item)).agent;
   const name = sessionTitle || (cwd ? basename(cwd) || cwd : undefined);
   try {

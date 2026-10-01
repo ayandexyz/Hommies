@@ -43,6 +43,7 @@
   },
   "files": [
     "dist",
+    "sounds",
     "README.md"
   ],
   "engines": {

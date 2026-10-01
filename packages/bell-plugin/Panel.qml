@@ -248,6 +248,15 @@ Panel {
     ? hostWidget.desktopNotifications
     : setting("desktopNotifications", true) !== false
 
+  readonly property bool sounds: hostWidget
+    ? hostWidget.sounds
+    : setting("sounds", false) === true
+
+  function toggleSounds() {
+    if (!hostWidget || typeof hostWidget.setSounds !== "function") return
+    hostWidget.setSounds(!root.sounds)
+  }
+
   function toggleDesktopNotifications() {
     if (!hostWidget || typeof hostWidget.setDesktopNotifications !== "function") return
     hostWidget.setDesktopNotifications(!root.desktopNotifications)
@@ -497,6 +506,25 @@ Panel {
               trackHeight: 22
               cursorPad: Style.space(2)
               onToggled: root.toggleDesktopNotifications()
+            }
+
+            Text {
+              anchors.verticalCenter: parent.verticalCenter
+              leftPadding: Style.space(8)
+              text: "Sound"
+              color: root.barForeground
+              opacity: 0.72
+              font.family: root.bar ? root.bar.fontFamily : Style.font.family
+              font.pixelSize: Style.font.caption
+            }
+
+            ToggleSwitch {
+              anchors.verticalCenter: parent.verticalCenter
+              checked: root.sounds
+              foreground: root.barForeground
+              trackHeight: 22
+              cursorPad: Style.space(2)
+              onToggled: root.toggleSounds()
             }
           }
         }

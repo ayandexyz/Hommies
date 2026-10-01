@@ -26,6 +26,7 @@ BarWidget {
   readonly property string questionAnswerSurface: String(setting("questionAnswerSurface", "Top bar")) === "Claude CLI"
     ? "cli" : "topbar"
   readonly property bool desktopNotifications: setting("desktopNotifications", true) !== false
+  readonly property bool sounds: setting("sounds", false) === true
   property var snapshot: ({ totalCount: 0, threads: [], sessions: [] })
   /** Sessions thinking or running tools; shown as a dot next to the bell. */
   readonly property int busyCount: {
@@ -67,7 +68,8 @@ BarWidget {
     if (typeof Bridge === "undefined") return
     Bridge.setPreferences({
       questionAnswerSurface: root.questionAnswerSurface,
-      desktopNotifications: root.desktopNotifications
+      desktopNotifications: root.desktopNotifications,
+      sounds: root.sounds
     }).catch((error) => {
       console.warn("agent-fold preference sync failed:", error)
     })
@@ -77,6 +79,9 @@ BarWidget {
   }
   function setDesktopNotifications(enabled) {
     updateSetting("desktopNotifications", enabled === true)
+  }
+  function setSounds(enabled) {
+    updateSetting("sounds", enabled === true)
   }
   function updateSetting(name, value) {
     var entry = { id: root.moduleName }
@@ -96,6 +101,7 @@ BarWidget {
   onBarChanged: injectPanel()
   onQuestionAnswerSurfaceChanged: syncPreferences()
   onDesktopNotificationsChanged: syncPreferences()
+  onSoundsChanged: syncPreferences()
 
   FileView {
     path: (Quickshell.env("XDG_DATA_HOME") || Quickshell.env("HOME") + "/.local/share") + "/agent-fold/port.json"

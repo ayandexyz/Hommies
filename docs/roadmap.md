@@ -194,6 +194,11 @@ version expects.
 
 ## 7. Optional sounds
 
+**Status: done.** See "Sounds" in `packages/omarchy-bridge/README.md`. The
+bridge plays the sounds (so they follow the same new-item events as desktop
+notifications), with a once-per-second limit. No volume setting yet; the
+sounds are generated quiet and follow the system volume.
+
 **Goal:** a short sound for new permissions or questions, errors, and
 finished turns.
 

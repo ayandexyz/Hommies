@@ -22,7 +22,8 @@
     "defaultSection": "right",
     "defaults": {
       "questionAnswerSurface": "Top bar",
-      "desktopNotifications": true
+      "desktopNotifications": true,
+      "sounds": false
     },
     "schema": [
       {
@@ -42,6 +43,13 @@
         "label": "Desktop notifications",
         "description": "Show a system notification for each new permission, question, waiting reply, or finished turn.",
         "defaultValue": true
+      },
+      {
+        "key": "sounds",
+        "type": "boolean",
+        "label": "Sounds",
+        "description": "Play a short chime for new permissions and questions, failed turns, and finished turns (pw-play or paplay).",
+        "defaultValue": false
       }
     ]
   },

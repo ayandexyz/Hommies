@@ -16,6 +16,7 @@ import { resolve } from "node:path";
 import { createDesktopNotifier } from "./notifier.js";
 import { startBridgeServer } from "./server.js";
 import { outdatedHookProviders } from "./setup.js";
+import { createSoundPlayer } from "./sound.js";
 
 interface RuntimeOptions {
   readonly dataDir: string;
@@ -55,6 +56,7 @@ async function main(): Promise<void> {
     host: options.host,
     ...(options.notify ? { notify: createDesktopNotifier() } : {}),
     checkHooks: () => outdatedHookProviders(),
+    playSound: createSoundPlayer(),
   });
   process.stdout.write(`agent-fold-bridge listening on ${options.host}:${server.port}\n`);
   const shutdown = async (): Promise<void> => {

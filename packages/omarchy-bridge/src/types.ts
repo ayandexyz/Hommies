@@ -1,6 +1,7 @@
 import type { ApprovalRequestId, ProviderDriverKind, ThreadId } from "./localContracts.js";
 import type { FocusWindow } from "./focus.js";
 import type { BridgeNotifier } from "./notifier.js";
+import type { BridgeSoundPlayer } from "./sound.js";
 
 /**
  * Options for `startBridgeServer`.
@@ -28,6 +29,8 @@ export interface BridgeServerOptions {
    * and every minute; `runtime.ts` passes `outdatedHookProviders`.
    */
   readonly checkHooks?: () => Promise<ReadonlyArray<string>>;
+  /** Plays a sound for each new item while the `sounds` preference is on. `runtime.ts` passes `createSoundPlayer()`. */
+  readonly playSound?: BridgeSoundPlayer;
 }
 
 /**
@@ -169,10 +172,12 @@ export interface PendingResponseInput {
   readonly answers?: Readonly<Record<string, unknown>>;
 }
 
-/** Either field may be sent alone; at least one is required. */
+/** Any field may be sent alone; at least one is required. */
 export interface BridgePreferencesInput {
   readonly questionAnswerSurface?: QuestionAnswerSurface;
   readonly desktopNotifications?: boolean;
+  /** Play a sound for new items. Off by default. */
+  readonly sounds?: boolean;
 }
 
 /** Payload sent by Claude Code's PermissionRequest hook. */
