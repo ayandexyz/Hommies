@@ -81,19 +81,49 @@ Panel {
     readonly property string activityState: threadData.activity ? String(threadData.activity.state) : ""
     readonly property bool busy: pendingCount === 0 && (activityState === "working" || activityState === "thinking")
     readonly property string failure: root.threadFailure(threadData)
+    // Status color for the stripe, fill, and label; "transparent" when idle.
+    readonly property color tone: busy ? statusColors.working
+      : failure !== "" ? root.failureColor(failure)
+      : pendingCount > 0 ? statusColors.attention
+      : finished ? statusColors.success : "transparent"
+    readonly property bool toned: tone.a > 0
+    // 0 → 1 the first time this session appears (see `root.firstSighting`).
+    property real entrance: 1
 
     text: ""
     leftAlign: true
     bordered: true
-    opacity: finished ? 0.72 : 1
+    background: toned ? Util.alpha(tone, 0.07) : "transparent"
+    opacity: (finished ? 0.72 : 1) * entrance
     implicitHeight: sessionContent.implicitHeight + Style.spacing.controlPaddingY * 2
+    transform: Translate { id: sessionShift }
+
+    Component.onCompleted: if (root.firstSighting("session:" + threadData.threadId)) sessionEnter.start()
+
+    ParallelAnimation {
+      id: sessionEnter
+      NumberAnimation { target: sessionRow; property: "entrance"; from: 0; to: 1; duration: 260; easing.type: Easing.OutCubic }
+      NumberAnimation { target: sessionShift; property: "x"; from: Style.space(14); to: 0; duration: 320; easing.type: Easing.OutCubic }
+    }
+
+    Rectangle {
+      visible: sessionRow.toned
+      anchors.left: parent.left
+      anchors.top: parent.top
+      anchors.bottom: parent.bottom
+      anchors.margins: Style.normalBorderWidth
+      width: Style.space(3)
+      radius: Math.min(Style.cornerRadius, width / 2)
+      color: sessionRow.tone
+      Behavior on color { ColorAnimation { duration: 200 } }
+    }
 
     Column {
       id: sessionContent
       anchors.left: parent.left
       anchors.right: parent.right
       anchors.verticalCenter: parent.verticalCenter
-      anchors.leftMargin: sessionRow.horizontalPadding + Style.normalBorderWidth
+      anchors.leftMargin: sessionRow.horizontalPadding + Style.normalBorderWidth + Style.space(3)
       anchors.rightMargin: sessionRow.horizontalPadding + Style.normalBorderWidth
       spacing: Style.space(2)
 
@@ -112,17 +142,26 @@ Panel {
           font.pixelSize: sessionRow.fontSize
           font.bold: true
         }
-        Text {
+        Row {
           id: sessionCount
-          text: sessionRow.busy ? (sessionRow.activityState === "working" ? "Working" : "Thinking")
-            : sessionRow.failure !== "" && sessionRow.pendingCount === 1 ? root.failureLabel(sessionRow.failure)
-            : sessionRow.finished ? "Done" : String(sessionRow.pendingCount)
-          color: sessionRow.busy ? "#3b82f6"
-            : sessionRow.failure !== "" ? root.failureColor(sessionRow.failure)
-            : sessionRow.finished ? "#22c55e" : sessionRow.foreground
-          font.family: sessionRow.fontFamily
-          font.pixelSize: sessionRow.fontSize
-          font.bold: true
+          spacing: Style.space(6)
+
+          PulseDot {
+            visible: sessionRow.busy
+            anchors.verticalCenter: parent.verticalCenter
+            tone: sessionRow.tone
+            running: sessionRow.busy
+          }
+          Text {
+            text: sessionRow.busy ? (sessionRow.activityState === "working" ? "Working" : "Thinking")
+              : sessionRow.failure !== "" && sessionRow.pendingCount === 1 ? root.failureLabel(sessionRow.failure)
+              : sessionRow.finished ? "Done" : String(sessionRow.pendingCount)
+            color: sessionRow.toned ? sessionRow.tone : sessionRow.foreground
+            font.family: sessionRow.fontFamily
+            font.pixelSize: sessionRow.fontSize
+            font.bold: true
+            Behavior on color { ColorAnimation { duration: 200 } }
+          }
         }
         Text {
           id: sessionChevron
@@ -147,8 +186,44 @@ Panel {
     }
   }
 
+  // A tinted surface with a status stripe on the left. Holds one pending
+  // item, or a notice such as the outdated-hooks reminder.
+  component StatusCard: Rectangle {
+    id: statusCard
+
+    property color tone: root.barForeground
+
+    color: Util.alpha(tone, 0.07)
+    border.width: Style.normalBorderWidth
+    border.color: Util.alpha(tone, 0.28)
+    radius: Style.cornerRadius
+    Behavior on color { ColorAnimation { duration: 200 } }
+
+    Rectangle {
+      anchors.left: parent.left
+      anchors.top: parent.top
+      anchors.bottom: parent.bottom
+      anchors.margins: statusCard.border.width
+      width: Style.space(3)
+      radius: Math.min(statusCard.radius, width / 2)
+      color: statusCard.tone
+      Behavior on color { ColorAnimation { duration: 200 } }
+    }
+  }
+
+  StatusPalette { id: statusColors }
+
   property var anchorItem: null
   property var hostWidget: null
+  // Keys of sessions and items already shown once. Delegates are rebuilt
+  // whenever the snapshot changes, so only a key's first sighting animates.
+  property var seenKeys: ({})
+
+  function firstSighting(key) {
+    if (seenKeys[key]) return false
+    seenKeys[key] = true
+    return true
+  }
   property string selectedProvider: "claude"
   /** Empty shows the session list; otherwise the open session's thread id. */
   property string selectedThreadId: ""
@@ -315,7 +390,14 @@ Panel {
   }
 
   function failureColor(failure) {
-    return failure === "ratelimit" ? "#f97316" : "#ef4444"
+    return failure === "ratelimit" ? statusColors.warning : statusColors.error
+  }
+
+  function itemTone(item) {
+    return item.failure ? failureColor(item.failure)
+      : item.kind === "permission" ? statusColors.warning
+      : item.kind === "finished" ? statusColors.success
+      : statusColors.attention
   }
 
   function threadBusy(thread) {
@@ -451,15 +533,26 @@ Panel {
           font.bold: true
         }
 
-        Text {
+        StatusCard {
           visible: root.outdatedHooks !== ""
           width: parent.width
-          text: root.outdatedHooks + " hooks are out of date. Run `agent-fold setup` to get every feature."
-          textFormat: Text.PlainText
-          color: "#f97316"
-          font.family: root.bar ? root.bar.fontFamily : Style.font.family
-          font.pixelSize: Style.font.caption
-          wrapMode: Text.WrapAtWordBoundaryOrAnywhere
+          implicitHeight: outdatedText.implicitHeight + Style.space(8) * 2
+          tone: statusColors.warning
+
+          Text {
+            id: outdatedText
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.leftMargin: Style.space(14)
+            anchors.rightMargin: Style.space(10)
+            text: root.outdatedHooks + " hooks are out of date. Run `agent-fold setup` to get every feature."
+            textFormat: Text.PlainText
+            color: statusColors.warning
+            font.family: root.bar ? root.bar.fontFamily : Style.font.family
+            font.pixelSize: Style.font.caption
+            wrapMode: Text.WrapAtWordBoundaryOrAnywhere
+          }
         }
 
         Item {
@@ -649,9 +742,10 @@ Panel {
             Button {
               visible: threadColumn.threadData.activity ? threadColumn.threadData.activity.focusable === true : false
               width: parent.width
-              text: "Go to terminal"
+              text: "↗  Go to terminal"
               bordered: true
-              foreground: root.barForeground
+              foreground: statusColors.attention
+              background: Util.alpha(statusColors.attention, 0.08)
               fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
               fontSize: Style.font.bodySmall
               onClicked: root.focusTerminal(threadColumn.threadData)
@@ -661,16 +755,30 @@ Panel {
               width: parent.width
               spacing: Style.space(2)
 
-              Text {
+              Row {
+                id: activityHeader
                 width: parent.width
-                text: threadColumn.threadData.activity && threadColumn.threadData.activity.state === "working" ? "Working"
-                  : threadColumn.threadData.activity && threadColumn.threadData.activity.state === "thinking" ? "Thinking"
-                  : "Recent activity"
-                color: root.barForeground
-                opacity: 0.72
-                font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                font.pixelSize: Style.font.caption
-                font.bold: true
+                spacing: Style.space(6)
+
+                readonly property bool busy: root.threadBusy(threadColumn.threadData)
+
+                PulseDot {
+                  visible: activityHeader.busy
+                  anchors.verticalCenter: parent.verticalCenter
+                  tone: statusColors.working
+                  running: activityHeader.busy
+                  size: Style.space(6)
+                }
+                Text {
+                  text: threadColumn.threadData.activity && threadColumn.threadData.activity.state === "working" ? "Working"
+                    : threadColumn.threadData.activity && threadColumn.threadData.activity.state === "thinking" ? "Thinking"
+                    : "Recent activity"
+                  color: activityHeader.busy ? statusColors.working : root.barForeground
+                  opacity: activityHeader.busy ? 1 : 0.72
+                  font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                  font.pixelSize: Style.font.caption
+                  font.bold: true
+                }
               }
 
               Repeater {
@@ -793,12 +901,34 @@ Panel {
                   })
                 }
 
+                readonly property color tone: root.itemTone(itemData)
+                readonly property real cardPadding: Style.space(8)
+                property real entrance: 1
+
                 width: parent.width
-                implicitHeight: itemColumn.implicitHeight + Style.space(4)
+                implicitHeight: itemColumn.implicitHeight + cardPadding * 2
+                opacity: entrance
+                transform: Translate { id: itemShift }
+
+                Component.onCompleted: if (root.firstSighting("item:" + itemData.id)) itemEnter.start()
+
+                ParallelAnimation {
+                  id: itemEnter
+                  NumberAnimation { target: itemDelegate; property: "entrance"; from: 0; to: 1; duration: 260; easing.type: Easing.OutCubic }
+                  NumberAnimation { target: itemShift; property: "y"; from: -Style.space(8); to: 0; duration: 320; easing.type: Easing.OutCubic }
+                }
+
+                StatusCard {
+                  anchors.fill: parent
+                  tone: itemDelegate.tone
+                }
+
                 Column {
                   id: itemColumn
-                  width: parent.width
-                  spacing: Style.space(4)
+                  x: itemDelegate.cardPadding + Style.space(3)
+                  y: itemDelegate.cardPadding
+                  width: parent.width - x - itemDelegate.cardPadding
+                  spacing: Style.space(6)
                   Row {
                   id: itemRow
                   visible: itemDelegate.itemData.kind !== "question"
@@ -808,9 +938,7 @@ Panel {
                     text: itemDelegate.itemData.failure ? "!"
                       : itemDelegate.itemData.kind === "attention" ? "\u21a9"
                       : itemDelegate.itemData.kind === "finished" ? "\u2713" : "!"
-                    color: itemDelegate.itemData.failure ? root.failureColor(itemDelegate.itemData.failure)
-                      : itemDelegate.itemData.kind === "attention" ? "#3b82f6"
-                      : itemDelegate.itemData.kind === "finished" ? "#22c55e" : "#ef4444"
+                    color: itemDelegate.tone
                     font.family: root.bar ? root.bar.fontFamily : Style.font.family
                     font.pixelSize: Style.font.body
                     font.bold: true
@@ -1006,11 +1134,12 @@ Panel {
                   width: parent.width
                   text: "Send answer"
                   bordered: true
-                  selected: itemDelegate.readyToSubmit()
-                  foreground: root.barForeground
+                  foreground: itemDelegate.readyToSubmit() ? statusColors.attention : root.barForeground
+                  background: itemDelegate.readyToSubmit() ? Util.alpha(statusColors.attention, 0.14) : "transparent"
                   fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
                   fontSize: Style.font.body
                   opacity: itemDelegate.readyToSubmit() ? 1 : 0.5
+                  Behavior on opacity { NumberAnimation { duration: 160 } }
                   onClicked: itemDelegate.submitAnswers()
                 }
 
@@ -1050,27 +1179,38 @@ Panel {
                   // (Claude with permission suggestions, OpenCode).
                   readonly property var choices: itemDelegate.itemData.canAcceptAlways === true
                     ? [
-                        { label: "Allow", decision: "accept" },
-                        { label: "Always", decision: "acceptAlways" },
-                        { label: "Deny", decision: "decline" },
+                        { label: "✓ Allow", decision: "accept" },
+                        { label: "✓✓ Always", decision: "acceptAlways" },
+                        { label: "✕ Deny", decision: "decline" },
                         { label: "Ask in CLI", decision: "cancel" }
                       ]
                     : [
-                        { label: "Allow", decision: "accept" },
-                        { label: "Deny", decision: "decline" },
+                        { label: "✓ Allow", decision: "accept" },
+                        { label: "✕ Deny", decision: "decline" },
                         { label: "Ask in CLI", decision: "cancel" }
                       ]
+
+                  function choiceTone(decision) {
+                    return decision === "accept" ? statusColors.success
+                      : decision === "acceptAlways" ? statusColors.attention
+                      : decision === "decline" ? statusColors.error
+                      : root.barForeground
+                  }
 
                   Repeater {
                     model: permissionRow.choices
 
                     delegate: Button {
+                      readonly property color tone: permissionRow.choiceTone(modelData.decision)
+                      readonly property bool plain: modelData.decision === "cancel"
+
                       width: (permissionRow.width - permissionRow.spacing * (permissionRow.choices.length - 1))
                         / permissionRow.choices.length
                       text: modelData.label
                       bordered: true
-                      selected: modelData.decision === "accept"
-                      foreground: root.barForeground
+                      foreground: tone
+                      background: plain ? "transparent" : Util.alpha(tone, modelData.decision === "accept" ? 0.18 : 0.1)
+                      opacity: plain ? 0.8 : 1
                       fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
                       fontSize: Style.font.bodySmall
                       onClicked: itemDelegate.respondPermission(modelData.decision)

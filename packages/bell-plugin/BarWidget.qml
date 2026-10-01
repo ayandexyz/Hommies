@@ -1,6 +1,7 @@
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import qs.Commons
 import qs.Ui
 import "bridge.js" as Bridge
 
@@ -28,6 +29,13 @@ BarWidget {
   readonly property bool desktopNotifications: setting("desktopNotifications", true) !== false
   readonly property bool sounds: setting("sounds", false) === true
   property var snapshot: ({ totalCount: 0, threads: [], sessions: [] })
+  // The last snapshot as JSON. Polls that return the same data are dropped
+  // so the panel's delegates (and their animations) are not rebuilt.
+  property string snapshotJson: ""
+  // False until the first snapshot lands, so startup doesn't ring the bell.
+  property bool primed: false
+  property int lastTotalCount: 0
+  readonly property int totalCount: snapshot && snapshot.totalCount ? snapshot.totalCount : 0
   /** Sessions thinking or running tools; shown as a dot next to the bell. */
   readonly property int busyCount: {
     var sessions = snapshot && snapshot.sessions ? snapshot.sessions : []
@@ -59,7 +67,14 @@ BarWidget {
   }
   function refreshSnapshot() {
     if (typeof Bridge !== "undefined") {
-      Bridge.snapshot().then((s) => { root.snapshot = s }).catch((error) => {
+      Bridge.snapshot().then((s) => {
+        var json = JSON.stringify(s)
+        if (json !== root.snapshotJson) {
+          root.snapshotJson = json
+          root.snapshot = s
+        }
+        root.primed = true
+      }).catch((error) => {
         console.warn("agent-fold snapshot failed:", error)
       })
     }
@@ -102,6 +117,12 @@ BarWidget {
   onQuestionAnswerSurfaceChanged: syncPreferences()
   onDesktopNotificationsChanged: syncPreferences()
   onSoundsChanged: syncPreferences()
+  onTotalCountChanged: {
+    if (primed && totalCount > lastTotalCount) ring.restart()
+    lastTotalCount = totalCount
+  }
+
+  StatusPalette { id: statusColors }
 
   FileView {
     path: (Quickshell.env("XDG_DATA_HOME") || Quickshell.env("HOME") + "/.local/share") + "/agent-fold/port.json"
@@ -143,14 +164,82 @@ BarWidget {
     id: button
     anchors.fill: parent
     bar: root.bar
-    text: "\ud83d\udd14" + (root.snapshot.totalCount > 0 ? " " + root.snapshot.totalCount : "")
-      + (root.busyCount > 0 ? " \u25cf" : "")
-    tooltipText: (root.snapshot.totalCount > 0
-      ? root.snapshot.totalCount + " pending agent item(s)"
+    // The bell, badge, and working dot are drawn below so they can animate;
+    // the built-in label stays empty.
+    labelVisible: false
+    hasVisualContent: true
+    fixedWidth: vertical ? -1 : bellContent.implicitWidth + scaledHorizontalMargin * 2
+    fixedHeight: vertical ? bellContent.implicitHeight + scaledVerticalPadding * 2 : -1
+    tooltipText: (root.totalCount > 0
+      ? root.totalCount + " pending agent item(s)"
       : "agent-fold: no pending items")
       + (root.busyCount > 0 ? "\n" + root.busyCount + " agent session(s) working" : "")
     onPressed: function (buttonCode) {
       if (buttonCode === Qt.LeftButton) root.toggle()
+    }
+
+    Grid {
+      id: bellContent
+      anchors.centerIn: parent
+      columns: button.vertical ? 1 : 3
+      spacing: Style.space(4)
+      horizontalItemAlignment: Grid.AlignHCenter
+      verticalItemAlignment: Grid.AlignVCenter
+
+      Text {
+        id: bellGlyph
+        text: "\ud83d\udd14"
+        textFormat: Text.PlainText
+        color: button.foreground
+        font.family: button.fontFamily
+        font.pixelSize: button.fontSize
+        renderType: Text.NativeRendering
+        transformOrigin: Item.Top
+      }
+
+      Rectangle {
+        id: badge
+        visible: root.totalCount > 0
+        height: badgeText.implicitHeight + Style.space(2)
+        width: Math.max(height, badgeText.implicitWidth + Style.space(8))
+        radius: height / 2
+        color: statusColors.attention
+
+        Text {
+          id: badgeText
+          anchors.centerIn: parent
+          text: root.totalCount > 99 ? "99+" : String(root.totalCount)
+          textFormat: Text.PlainText
+          color: Color.background
+          font.family: button.fontFamily
+          font.pixelSize: Style.font.caption
+          font.bold: true
+        }
+      }
+
+      PulseDot {
+        visible: root.busyCount > 0
+        tone: statusColors.working
+        running: root.busyCount > 0
+        size: Style.space(6)
+      }
+    }
+
+    // Rings the bell and pops the badge when the pending count goes up.
+    ParallelAnimation {
+      id: ring
+
+      SequentialAnimation {
+        NumberAnimation { target: bellGlyph; property: "rotation"; to: 20; duration: 70; easing.type: Easing.OutQuad }
+        NumberAnimation { target: bellGlyph; property: "rotation"; to: -16; duration: 110; easing.type: Easing.InOutQuad }
+        NumberAnimation { target: bellGlyph; property: "rotation"; to: 11; duration: 100; easing.type: Easing.InOutQuad }
+        NumberAnimation { target: bellGlyph; property: "rotation"; to: -6; duration: 90; easing.type: Easing.InOutQuad }
+        NumberAnimation { target: bellGlyph; property: "rotation"; to: 0; duration: 90; easing.type: Easing.OutQuad }
+      }
+      SequentialAnimation {
+        NumberAnimation { target: badge; property: "scale"; from: 1; to: 1.35; duration: 120; easing.type: Easing.OutQuad }
+        NumberAnimation { target: badge; property: "scale"; to: 1; duration: 260; easing.type: Easing.OutBack }
+      }
     }
   }
 }
