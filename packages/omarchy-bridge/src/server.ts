@@ -45,7 +45,13 @@ interface PendingPermission {
   readonly timer: ReturnType<typeof setTimeout>;
 }
 
-type ClaudeHookDecision = { readonly behavior: "allow" | "deny" | "unchanged" };
+type ClaudeHookDecision = {
+  readonly behavior: "allow" | "deny" | "unchanged";
+  /** Claude: rules to save with the allow (its own `permission_suggestions`). */
+  readonly updatedPermissions?: ReadonlyArray<unknown>;
+  /** OpenCode: remember the allow (`always`). */
+  readonly remember?: boolean;
+};
 
 interface BridgeState {
   readonly token: string;
@@ -648,6 +654,7 @@ async function receivePermission(response: ServerResponse, input: ClaudePermissi
   const item: PendingItem = {
     id, threadId: ThreadId(input.session_id), provider, kind: "permission",
     summary: describeTool(input.tool_name, input.tool_input), createdAt: new Date().toISOString(),
+    ...(canAcceptAlways(provider, input) ? { canAcceptAlways: true } : {}),
   };
   const result = await new Promise<ClaudeHookDecision>((resolve) => {
     const timer = setTimeout(() => {
@@ -666,7 +673,29 @@ async function receivePermission(response: ServerResponse, input: ClaudePermissi
     announce(state, item, input.cwd, input.session_title);
   });
   if (result.behavior === "unchanged") return sendJson(response, 200, {});
-  return sendJson(response, 200, { hookSpecificOutput: { hookEventName: "PermissionRequest", decision: { behavior: result.behavior } } });
+  const decision = {
+    behavior: result.behavior,
+    ...(result.updatedPermissions === undefined ? {} : { updatedPermissions: result.updatedPermissions }),
+    ...(result.remember === true ? { remember: true } : {}),
+  };
+  return sendJson(response, 200, { hookSpecificOutput: { hookEventName: "PermissionRequest", decision } });
+}
+
+/**
+ * Codex rejects `updatedPermissions`, and Omacode only offers wider grants in
+ * its own prompt, so only Claude (when it sent suggestions) and OpenCode can.
+ */
+function canAcceptAlways(provider: Provider, input: ClaudePermissionHookInput): boolean {
+  if (provider === "opencode") return true;
+  return provider === "claude" && Array.isArray(input.permission_suggestions) && input.permission_suggestions.length > 0;
+}
+
+function permissionDecision(pending: PendingPermission, decision: NonNullable<PendingResponseInput["decision"]>): ClaudeHookDecision {
+  if (decision === "decline") return { behavior: "deny" };
+  if (decision === "cancel") return { behavior: "unchanged" };
+  if (decision === "accept" || pending.item.canAcceptAlways !== true) return { behavior: "allow" };
+  if (pending.provider === "opencode") return { behavior: "allow", remember: true };
+  return { behavior: "allow", updatedPermissions: pending.hookInput.permission_suggestions ?? [] };
 }
 
 function respond(response: ServerResponse, input: PendingResponseInput, state: BridgeState): void {
@@ -692,12 +721,12 @@ function respond(response: ServerResponse, input: PendingResponseInput, state: B
     return sendJson(response, 200, { ok: true });
   }
   if (!pending || pending.item.threadId !== input.threadId) return sendJson(response, 404, { error: "pending request not found" });
-  if (input.decision !== "accept" && input.decision !== "decline" && input.decision !== "cancel") {
-    return sendJson(response, 400, { error: "permission decision must be accept, decline, or cancel" });
+  if (input.decision !== "accept" && input.decision !== "acceptAlways" && input.decision !== "decline" && input.decision !== "cancel") {
+    return sendJson(response, 400, { error: "permission decision must be accept, acceptAlways, decline, or cancel" });
   }
   state.pending.delete(input.requestId);
   clearTimeout(pending.timer);
-  pending.resolve({ behavior: input.decision === "accept" ? "allow" : input.decision === "decline" ? "deny" : "unchanged" });
+  pending.resolve(permissionDecision(pending, input.decision));
   publish(state);
   return sendJson(response, 200, { ok: true });
 }

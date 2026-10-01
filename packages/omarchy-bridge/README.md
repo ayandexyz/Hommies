@@ -66,7 +66,7 @@ The sections below document the entries setup writes, for manual installs.
 
 The first provider integration uses Claude Code's `PermissionRequest` command
 hook. It forwards the tool request to the local bridge and waits for an
-**Accept**, **Decline**, or **Cancel** response from agent-fold. If the bridge
+**Accept**, **Always allow**, **Decline**, or **Cancel** response from agent-fold. If the bridge
 is not running, the hook produces no decision, so Claude Code keeps its normal
 terminal permission prompt.
 
@@ -222,6 +222,23 @@ Adapters post to `/v1/providers/{provider}/failure`:
 
 Older plugin copies ignore `failure` and show these as plain attention items.
 
+## Always allow
+
+Permission items show **Always** next to Allow when the agent can remember the
+rule; the item then has `"canAcceptAlways": true`, and the panel sends
+`"decision": "acceptAlways"` to `/v1/respond`.
+
+- **Claude Code**: offered when the `PermissionRequest` payload has
+  `permission_suggestions`. The bridge allows the request and returns those
+  suggestions unchanged as `updatedPermissions`, the same rules Claude's own
+  "don't ask again" option would save (Claude picks where they are stored).
+  The bar never invents rules.
+- **OpenCode**: the plugin replies `always` instead of `once`.
+- **Codex** rejects `updatedPermissions` in its hook output, and **Omacode**
+  only offers wider grants in its own prompt, so neither gets the button.
+
+`acceptAlways` on an item without `canAcceptAlways` is treated as `accept`.
+
 ## Jump to the terminal
 
 Opening a session in the panel shows **Go to terminal**, which focuses the
@@ -296,8 +313,8 @@ OpenCode has no command hooks, so agent-fold ships an OpenCode server plugin,
 `dist/opencode-plugin.js`. It runs inside OpenCode and gives OpenCode the same
 features as Claude Code:
 
-- **Permissions** (`permission.asked`): Accept replies `once`, Decline replies
-  `reject`, Cancel leaves the prompt to OpenCode.
+- **Permissions** (`permission.asked`): Accept replies `once`, Always replies
+  `always`, Decline replies `reject`, Cancel leaves the prompt to OpenCode.
 - **Questions** from OpenCode's `question` tool, including multi-select and
   typed answers.
 - **Turn ends** (`session.idle`): plain-text questions become `attention`

@@ -965,15 +965,27 @@ Panel {
                   width: parent.width
                   spacing: Style.space(4)
 
+                  // "Always" only appears when the agent can remember the rule
+                  // (Claude with permission suggestions, OpenCode).
+                  readonly property var choices: itemDelegate.itemData.canAcceptAlways === true
+                    ? [
+                        { label: "Allow", decision: "accept" },
+                        { label: "Always", decision: "acceptAlways" },
+                        { label: "Deny", decision: "decline" },
+                        { label: "Ask in CLI", decision: "cancel" }
+                      ]
+                    : [
+                        { label: "Allow", decision: "accept" },
+                        { label: "Deny", decision: "decline" },
+                        { label: "Ask in CLI", decision: "cancel" }
+                      ]
+
                   Repeater {
-                    model: [
-                      { label: "Allow", decision: "accept" },
-                      { label: "Deny", decision: "decline" },
-                      { label: "Ask in CLI", decision: "cancel" }
-                    ]
+                    model: permissionRow.choices
 
                     delegate: Button {
-                      width: (permissionRow.width - permissionRow.spacing * 2) / 3
+                      width: (permissionRow.width - permissionRow.spacing * (permissionRow.choices.length - 1))
+                        / permissionRow.choices.length
                       text: modelData.label
                       bordered: true
                       selected: modelData.decision === "accept"

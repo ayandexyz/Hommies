@@ -88,6 +88,11 @@ export interface PendingItem {
    * reply. Optional, so older clients show it as a plain attention item.
    */
   readonly failure?: SessionFailureKind;
+  /**
+   * Set on a `permission` item when `acceptAlways` would also stop the agent
+   * asking again: Claude with permission suggestions, and OpenCode.
+   */
+  readonly canAcceptAlways?: boolean;
 }
 
 /** `ratelimit` covers usage limits and an overloaded API; anything else is `error`. */
@@ -148,7 +153,12 @@ export interface SessionActivity {
 export interface PendingResponseInput {
   readonly threadId: ThreadId;
   readonly requestId: ApprovalRequestId;
-  readonly decision?: "accept" | "decline" | "cancel";
+  /**
+   * `acceptAlways` allows and remembers the rule: Claude applies its own
+   * permission suggestions, OpenCode replies `always`. Items without
+   * `canAcceptAlways` treat it as `accept`.
+   */
+  readonly decision?: "accept" | "acceptAlways" | "decline" | "cancel";
   readonly answers?: Readonly<Record<string, unknown>>;
 }
 

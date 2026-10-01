@@ -120,7 +120,7 @@ export const AgentFoldOpenCode = async (input: PluginInput) => {
       await http.post({
         url: "/permission/{requestID}/reply",
         path: { requestID: id },
-        body: { reply: behavior === "allow" ? "once" : "reject" },
+        body: { reply: behavior === "always" ? "always" : behavior === "allow" ? "once" : "reject" },
         headers: { "content-type": "application/json" },
       });
     } finally {
@@ -308,11 +308,12 @@ function failureName(error: Readonly<Record<string, unknown>>, data: Readonly<Re
   return "unknown";
 }
 
-function decisionOf(result: unknown): "allow" | "deny" | null {
+function decisionOf(result: unknown): "allow" | "always" | "deny" | null {
   if (!isRecord(result) || !isRecord(result.hookSpecificOutput)) return null;
   const decision = result.hookSpecificOutput.decision;
   if (!isRecord(decision)) return null;
-  return decision.behavior === "allow" || decision.behavior === "deny" ? decision.behavior : null;
+  if (decision.behavior === "allow") return decision.remember === true ? "always" : "allow";
+  return decision.behavior === "deny" ? "deny" : null;
 }
 
 function answersOf(result: unknown): string[][] | null {

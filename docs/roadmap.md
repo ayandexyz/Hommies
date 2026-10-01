@@ -128,6 +128,11 @@ extra step to pick the right pane.
 
 ## 4. "Always allow" for permissions
 
+**Status: done.** See "Always allow" in `packages/omarchy-bridge/README.md`.
+Codex turned out to reject `updatedPermissions` in its hook output and has no
+session-wide allow in the hook protocol, so the button is Claude- and
+OpenCode-only. Items carry a new optional `canAcceptAlways` flag.
+
 **Goal:** a third button next to Allow / Deny that approves the request and
 stops the same rule from asking again.
 

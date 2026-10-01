@@ -13,7 +13,8 @@ by agent, with a click-through to the thread.
 ## Features
 
 - **Answer from the bar**: permission requests and questions from Claude Code, Codex,
-  OpenCode, and Omacode, grouped by agent and session.
+  OpenCode, and Omacode, grouped by agent and session. **Always** saves the rule for
+  Claude Code and OpenCode, so the same request does not ask again.
 - **Turn ends**: a session that stopped with a question in plain text shows as waiting
   for your reply; one that simply finished shows as done.
 - **Live activity**: each running session shows whether it is thinking or working,
