@@ -54,6 +54,21 @@ through symlinked dotfiles, and leaves unparseable files and OpenCode's
 `opencode.jsonc` untouched (register those by hand as described below). Limit it
 with `--only claude,codex,opencode`.
 
+To see whether each agent's hooks match what this version of setup writes:
+
+```sh
+agent-fold setup --check
+```
+
+It reports each agent as up to date, out of date (missing events, an old
+install path, or edited matchers or timeouts), without agent-fold hooks, or not
+installed, and exits `1` when any are out of date. Only agent-fold's own
+entries are compared, so your other hooks and their order do not matter. The
+bridge runs the same check at start and every minute and lists out-of-date
+agents in `hooksOutdated` on `/v1/pending`; the panel then shows a reminder to
+re-run setup. Hooks you trimmed on purpose (for example, the activity hooks)
+also count as out of date.
+
 To remove everything setup added:
 
 ```sh

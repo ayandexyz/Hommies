@@ -185,6 +185,14 @@ Panel {
     return providerName(item ? item.provider : "")
   }
 
+  /** e.g. "Claude, Codex" when `agent-fold setup --check` would report them out of date. */
+  readonly property string outdatedHooks: {
+    var providers = hostWidget && hostWidget.snapshot && hostWidget.snapshot.hooksOutdated ? hostWidget.snapshot.hooksOutdated : []
+    var names = []
+    for (var index = 0; index < providers.length; index++) names.push(providerName(providers[index]))
+    return names.join(", ")
+  }
+
   readonly property bool showOtherTab: providerCount("other") > 0 || sessionActivity("other").length > 0
 
   function sessionProject(thread) {
@@ -432,6 +440,17 @@ Panel {
           font.family: root.bar ? root.bar.fontFamily : Style.font.family
           font.pixelSize: Style.font.subtitle
           font.bold: true
+        }
+
+        Text {
+          visible: root.outdatedHooks !== ""
+          width: parent.width
+          text: root.outdatedHooks + " hooks are out of date. Run `agent-fold setup` to get every feature."
+          textFormat: Text.PlainText
+          color: "#f97316"
+          font.family: root.bar ? root.bar.fontFamily : Style.font.family
+          font.pixelSize: Style.font.caption
+          wrapMode: Text.WrapAtWordBoundaryOrAnywhere
         }
 
         Item {

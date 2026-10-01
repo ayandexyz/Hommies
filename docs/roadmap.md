@@ -175,6 +175,10 @@ a dedicated adapter.
 
 ## 6. Detect outdated hooks
 
+**Status: done.** `agent-fold setup --check`, `hooksOutdated` on
+`/v1/pending`, and a reminder in the panel. The check compares only
+agent-fold's own entries, so the user's hook order never causes a false alarm.
+
 **Goal:** tell the user when their installed hooks are older than what this
 version expects.
 

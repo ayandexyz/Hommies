@@ -37,6 +37,7 @@ const idleSessionTimeoutMs = 30 * 60 * 1000;
 /** A busy session can sit in one long tool call (a build, a test run), so it gets longer. */
 const busySessionTimeoutMs = 3 * 60 * 60 * 1000;
 const maxSessionSteps = 20;
+const hookCheckIntervalMs = 60 * 1000;
 
 interface PendingPermission {
   readonly item: PendingItem;
@@ -65,6 +66,7 @@ interface BridgeState {
   readonly streams: Set<ServerResponse>;
   readonly notify: BridgeNotifier | undefined;
   readonly focusWindow: FocusWindow;
+  hooksOutdated: ReadonlyArray<string>;
   questionAnswerSurface: QuestionAnswerSurface;
   desktopNotifications: boolean;
 }
@@ -164,6 +166,7 @@ export async function startBridgeServer(
     streams: new Set(),
     notify: options.notify,
     focusWindow: options.focusWindow ?? focusHyprlandWindow,
+    hooksOutdated: [],
     questionAnswerSurface: "topbar",
     desktopNotifications: true,
   };
@@ -172,6 +175,21 @@ export async function startBridgeServer(
     server.once("error", reject);
     server.listen(options.port, host, () => { server.off("error", reject); resolve(); });
   });
+  const checkHooks = options.checkHooks;
+  const refreshHooks = async (): Promise<void> => {
+    if (!checkHooks) return;
+    try {
+      const outdated = [...await checkHooks()].sort();
+      if (JSON.stringify(outdated) === JSON.stringify(state.hooksOutdated)) return;
+      state.hooksOutdated = outdated;
+      publish(state);
+    } catch {
+      // A failed check is not a reason to warn; keep the last result.
+    }
+  };
+  await refreshHooks();
+  const hookTimer = checkHooks ? setInterval(() => { void refreshHooks(); }, hookCheckIntervalMs) : undefined;
+  hookTimer?.unref();
   const address = server.address();
   if (address === null || typeof address === "string") throw new Error("agent-fold bridge did not receive a TCP address");
   await writeFile(
@@ -182,6 +200,7 @@ export async function startBridgeServer(
   return {
     port: address.port,
     close: async () => {
+      if (hookTimer) clearInterval(hookTimer);
       for (const pending of state.pending.values()) {
         clearTimeout(pending.timer);
         pending.resolve({ behavior: "unchanged" });
@@ -786,6 +805,7 @@ function snapshot(state: BridgeState): PendingResponse {
     totalCount: state.pending.size + state.questions.size + state.attention.size,
     threads: [...threads.values()],
     sessions: sessionsSnapshot(state),
+    ...(state.hooksOutdated.length > 0 ? { hooksOutdated: state.hooksOutdated } : {}),
   };
 }
 

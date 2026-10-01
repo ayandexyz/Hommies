@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 /** `agent-fold` CLI: registers or removes the agent hooks that report to the bridge. */
-import { defaultSetupEnvironment, runSetup, SETUP_PROVIDERS, type SetupProvider, type SetupResult } from "./setup.js";
+import {
+  checkHooks, defaultSetupEnvironment, runSetup, SETUP_PROVIDERS, type HookCheck, type SetupProvider, type SetupResult,
+} from "./setup.js";
 
 const USAGE = `Usage: agent-fold <command> [options]
 
@@ -10,6 +12,8 @@ Commands:
 
 Options:
   --dry-run          Show what would change without writing anything
+  --check            Report whether each agent's hooks are current; exits 1
+                     when any are out of date (setup only)
   --only <list>      Comma-separated providers: ${SETUP_PROVIDERS.join(",")}
   -h, --help         Show this help
 
@@ -35,6 +39,22 @@ function report(results: ReadonlyArray<SetupResult>, uninstall: boolean): void {
   if (updated.size > 0) process.stdout.write("Omacode needs no setup; its integration is built in.\n");
 }
 
+const checkLines: Record<HookCheck["status"], string> = {
+  current: "✓ hooks are up to date",
+  outdated: "! hooks are out of date; run `agent-fold setup`",
+  missing: "- no agent-fold hooks; run `agent-fold setup` to add them",
+  "not-installed": "- not installed",
+  unsupported: "- JSONC config; check it by hand (see README)",
+  error: "✗ config could not be read",
+};
+
+function reportChecks(checks: ReadonlyArray<HookCheck>): void {
+  for (const check of checks) {
+    const [mark, ...words] = checkLines[check.status].split(" ");
+    process.stdout.write(`${mark} ${check.provider.padEnd(8)} ${words.join(" ")} (${check.file})\n`);
+  }
+}
+
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   if (args.length === 0 || args.includes("-h") || args.includes("--help")) {
@@ -45,16 +65,25 @@ async function main(): Promise<void> {
   if (command !== "setup" && command !== "uninstall") fail(`unknown command '${command ?? ""}'`);
 
   let dryRun = false;
+  let check = false;
   let providers: ReadonlyArray<SetupProvider> = SETUP_PROVIDERS;
   for (let i = 0; i < rest.length; i++) {
     const arg = rest[i];
     if (arg === "--dry-run") dryRun = true;
+    else if (arg === "--check" && command === "setup") check = true;
     else if (arg === "--only") {
       const list = (rest[++i] ?? "").split(",").map((value) => value.trim()).filter((value) => value !== "");
       const unknown = list.filter((value) => !isProvider(value));
       if (list.length === 0 || unknown.length > 0) fail(`--only expects ${SETUP_PROVIDERS.join(", ")}`);
       providers = list.filter(isProvider);
     } else fail(`unknown option '${arg ?? ""}'`);
+  }
+
+  if (check) {
+    const checks = await checkHooks(defaultSetupEnvironment(), providers);
+    reportChecks(checks);
+    if (checks.some((entry) => entry.status === "outdated" || entry.status === "error")) process.exitCode = 1;
+    return;
   }
 
   const uninstall = command === "uninstall";

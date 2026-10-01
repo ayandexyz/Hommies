@@ -23,6 +23,11 @@ export interface BridgeServerOptions {
   readonly notify?: BridgeNotifier;
   /** Focuses a session's terminal for `POST /v1/focus`. Defaults to `hyprctl`; tests pass a stub. */
   readonly focusWindow?: FocusWindow;
+  /**
+   * Returns the agents whose agent-fold hooks are out of date. Run at start
+   * and every minute; `runtime.ts` passes `outdatedHookProviders`.
+   */
+  readonly checkHooks?: () => Promise<ReadonlyArray<string>>;
 }
 
 /**
@@ -118,6 +123,8 @@ export interface PendingResponse {
    * `totalCount`: nothing here needs an answer. Optional for HTTP compatibility.
    */
   readonly sessions?: ReadonlyArray<SessionActivity>;
+  /** Agents whose hooks differ from what `agent-fold setup` writes. Absent when none are. */
+  readonly hooksOutdated?: ReadonlyArray<string>;
 }
 
 /**

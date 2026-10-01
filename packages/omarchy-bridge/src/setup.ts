@@ -111,6 +111,35 @@ export function mergeCommandHooks(
   return next;
 }
 
+/**
+ * agent-fold's own entries in a command-hook config, one sorted line per
+ * entry. Two configs with the same lines have the same agent-fold hooks,
+ * whatever the order of the user's other hooks.
+ */
+export function commandHookFingerprint(config: JsonObject, hookFile: string): string[] {
+  const hooks = isObject(config.hooks) ? config.hooks : {};
+  const lines: string[] = [];
+  for (const [event, groups] of Object.entries(hooks)) {
+    if (!Array.isArray(groups)) continue;
+    for (const group of groups) {
+      if (!isObject(group) || !Array.isArray(group.hooks)) continue;
+      for (const entry of group.hooks) {
+        if (!isObject(entry) || !isAgentFoldCommand(entry.command, hookFile)) continue;
+        lines.push(JSON.stringify([event, group.matcher ?? null, entry.command, entry.timeout ?? null]));
+      }
+    }
+  }
+  return lines.sort();
+}
+
+export function openCodeFingerprint(config: JsonObject): string[] {
+  const plugins = Array.isArray(config.plugin) ? config.plugin : [];
+  return plugins
+    .filter((entry: unknown): entry is string =>
+      typeof entry === "string" && entry.endsWith("/opencode-plugin.js") && /agent-fold|omarchy-bridge/.test(entry))
+    .sort();
+}
+
 export const mergeClaudeSettings = (config: JsonObject, command: string | null): JsonObject =>
   mergeCommandHooks(config, CLAUDE_HOOKS, "claude-hook.js", command);
 
@@ -159,6 +188,8 @@ interface ProviderTarget {
   readonly configDir: string;
   readonly file: string;
   readonly merge: (config: JsonObject, install: boolean) => JsonObject;
+  /** agent-fold's entries in a config; see `commandHookFingerprint`. */
+  readonly fingerprint: (config: JsonObject) => string[];
   /** Config variants setup cannot edit safely; when one exists the provider is skipped. */
   readonly unsupported?: string;
 }
@@ -175,12 +206,14 @@ function targets(environment: SetupEnvironment): ReadonlyArray<ProviderTarget> {
       configDir: claudeDir,
       file: join(claudeDir, "settings.json"),
       merge: (config, install) => mergeClaudeSettings(config, install ? hookCommand(join(distDir, "claude-hook.js")) : null),
+      fingerprint: (config) => commandHookFingerprint(config, "claude-hook.js"),
     },
     {
       provider: "codex",
       configDir: codexDir,
       file: join(codexDir, "hooks.json"),
       merge: (config, install) => mergeCodexHooks(config, install ? hookCommand(join(distDir, "codex-hook.js")) : null),
+      fingerprint: (config) => commandHookFingerprint(config, "codex-hook.js"),
     },
     {
       provider: "opencode",
@@ -189,6 +222,7 @@ function targets(environment: SetupEnvironment): ReadonlyArray<ProviderTarget> {
       unsupported: join(openCodeDir, "opencode.jsonc"),
       merge: (config, install) =>
         mergeOpenCodeConfig(config, install ? pathToFileURL(join(distDir, "opencode-plugin.js")).href : null),
+      fingerprint: openCodeFingerprint,
     },
   ];
 }
@@ -269,6 +303,57 @@ export async function runSetup(options: SetupOptions, environment: SetupEnvironm
     }
   }
   return results;
+}
+
+/**
+ * - `current`: the config has exactly the hooks setup would write
+ * - `outdated`: it has agent-fold hooks, but not those (missing events, old
+ *   paths, edited matchers or timeouts)
+ * - `missing`: the agent is installed but has no agent-fold hooks
+ * - `not-installed`, `unsupported` (OpenCode JSONC), `error` (unreadable config)
+ */
+export type HookStatus = "current" | "outdated" | "missing" | "not-installed" | "unsupported" | "error";
+
+export interface HookCheck {
+  readonly provider: SetupProvider;
+  readonly status: HookStatus;
+  readonly file: string;
+}
+
+/** Compares each agent's config with what `setup` would write. Never writes. */
+export async function checkHooks(
+  environment: SetupEnvironment,
+  providers: ReadonlyArray<SetupProvider> = SETUP_PROVIDERS,
+): Promise<ReadonlyArray<HookCheck>> {
+  const checks: HookCheck[] = [];
+  for (const target of targets(environment)) {
+    if (!providers.includes(target.provider)) continue;
+    const { provider, file } = target;
+    if (!(await exists(target.configDir))) {
+      checks.push({ provider, status: "not-installed", file: target.configDir });
+      continue;
+    }
+    if (target.unsupported !== undefined && (await exists(target.unsupported))) {
+      checks.push({ provider, status: "unsupported", file: target.unsupported });
+      continue;
+    }
+    try {
+      const config = (await readConfig(file)) ?? {};
+      const current = target.fingerprint(config);
+      const expected = target.fingerprint(target.merge(config, true));
+      const status = current.length === 0 ? "missing"
+        : JSON.stringify(current) === JSON.stringify(expected) ? "current" : "outdated";
+      checks.push({ provider, status, file });
+    } catch {
+      checks.push({ provider, status: "error", file });
+    }
+  }
+  return checks;
+}
+
+/** Providers whose agent-fold hooks exist but differ from what setup would write. */
+export async function outdatedHookProviders(environment: SetupEnvironment = defaultSetupEnvironment()): Promise<SetupProvider[]> {
+  return (await checkHooks(environment)).filter((check) => check.status === "outdated").map((check) => check.provider);
 }
 
 export const defaultSetupEnvironment = (): SetupEnvironment => ({ home: homedir(), env: process.env });
