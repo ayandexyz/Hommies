@@ -309,7 +309,9 @@ tmux, `tmux_pane` and `tmux_socket` from `$TMUX_PANE` and `$TMUX`.
    ancestor. When one process owns several windows (kitty single instance,
    foot server), a window whose title contains the session title or project
    folder wins.
-3. Runs `hyprctl dispatch focuswindow address:<address>`.
+3. Focuses it by address: `hyprctl dispatch 'hl.dsp.focus({ window = "address:<address>" })'`
+   on Hyprland 0.56+ (Lua dispatch), falling back to
+   `hyprctl dispatch focuswindow address:<address>` on older versions.
 
 It answers `404` when the session sent no ancestry or no window matched (for
 example an agent over SSH, or a headless `opencode serve`). Sessions the bridge

@@ -87,6 +87,26 @@ export const focusHyprlandWindow: FocusWindow = async (target) => {
   if (clients === null) return false;
   const client = pickClient(parseClients(clients), pids, target.hints);
   if (client === null) return false;
-  const result = await run("hyprctl", ["dispatch", "focuswindow", `address:${client.address}`]);
-  return result !== null && result.trim() === "ok";
+  return focusAddress(client.address);
 };
+
+/**
+ * Hyprland 0.56+ parses `hyprctl dispatch` as Lua (`hl.dsp.focus`); older
+ * versions take the `focuswindow` dispatcher. Each answers the other's syntax
+ * with an error rather than `ok`, so try the new one, then the old one.
+ */
+export function focusCommands(address: string): ReadonlyArray<ReadonlyArray<string>> {
+  return [
+    ["dispatch", `hl.dsp.focus({ window = "address:${address}" })`],
+    ["dispatch", "focuswindow", `address:${address}`],
+  ];
+}
+
+async function focusAddress(address: string): Promise<boolean> {
+  // Addresses come from `hyprctl clients -j`; keep them out of the Lua string if they ever look odd.
+  if (!/^0x[0-9a-f]+$/i.test(address)) return false;
+  for (const args of focusCommands(address)) {
+    if ((await run("hyprctl", args))?.trim() === "ok") return true;
+  }
+  return false;
+}

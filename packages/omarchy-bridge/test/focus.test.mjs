@@ -6,7 +6,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { pickClient, validTmux } from "../dist/focus.js";
+import { focusCommands, pickClient, validTmux } from "../dist/focus.js";
 import { ancestorPids, parentPid, processFields } from "../dist/process-tree.js";
 import { startBridgeServer } from "../dist/server.js";
 
@@ -44,6 +44,13 @@ test("the nearest ancestor's window wins, and a matching title breaks ties", () 
   assert.equal(pickClient(clients, [99, 20, 10], []).address, "0xb");
   assert.equal(pickClient(clients, [10, 20], ["app"]).address, "0xa");
   assert.equal(pickClient(clients, [7], []), null);
+});
+
+test("focus tries Hyprland's Lua dispatch first, then the classic dispatcher", () => {
+  assert.deepEqual(focusCommands("0xabc"), [
+    ["dispatch", 'hl.dsp.focus({ window = "address:0xabc" })'],
+    ["dispatch", "focuswindow", "address:0xabc"],
+  ]);
 });
 
 test("tmux targets must look like tmux's own values", () => {
