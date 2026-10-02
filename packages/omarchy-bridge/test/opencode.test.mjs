@@ -135,7 +135,8 @@ test("turn ends become attention or finished items; subagents, placeholders, and
     await plugin.event({ event: { type: "session.deleted", properties: { sessionID: "ses_fresh", info: sessions.fresh } } });
     await waitFor(request, (value) => value.totalCount === 0);
   }, { notify: (notification) => sent.push(notification) });
-  assert.deepEqual(sent.slice(0, 2).map((notification) => [notification.title, notification.urgency]), [
+  // event() never awaits its handler, so the two idle POSTs race: compare without order.
+  assert.deepEqual(sent.slice(0, 2).map((notification) => [notification.title, notification.urgency]).sort(), [
     ["OpenCode · Wire up OpenCode", "normal"],
     ["OpenCode · other", "low"],
   ]);
