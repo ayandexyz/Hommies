@@ -3,8 +3,8 @@
 Localhost HTTP bridge that surfaces pending coding-agent questions and permissions
 to the agent-fold Omarchy plugin.
 
-This package embeds a thin slice of the T3 Code orchestration layer. It is *not* a
-client of a separately running T3 Code server; it is the server.
+It is a self-contained server: the agent hooks, the OpenCode plugin, and the Omarchy
+plugin all talk to it over loopback HTTP.
 
 ## API
 
