@@ -11,7 +11,7 @@ pnpm workspace monorepo with two packages.
   - Codex: blocking command hooks (`src/codex-hook.ts`, bin `agent-fold-codex-hook`).
   - OpenCode: in-process plugin (`src/opencode-plugin.ts`, export `AgentFoldOpenCode`).
   - Omacode: built-in to the agent itself; Omacode talks to the same endpoints as OpenCode.
-  Local contracts (`@t3tools/contracts` placeholders) live in `src/localContracts.ts`.
+  Shared branded ID types and provider kinds live in `src/localContracts.ts`.
 - `packages/bell-plugin/` — Omarchy plugin distributed as a folder consumed by
   `omarchy plugin add`. QML (`BarWidget.qml` entry, `Panel.qml` loaded via
   `Loader`, `Service.qml` daemon supervisor, `ProviderLogo.qml` shared
@@ -20,11 +20,6 @@ pnpm workspace monorepo with two packages.
 
 ## Hard constraints
 
-- **Do not vendor T3 Code source into this repo.** Add features to
-  `server-core` upstream in `~/Projects/githubProjects/t3code` and consume
-  them here. `src/localContracts.ts` is a deliberate placeholder for
-  `@t3tools/contracts` — replace the whole file with `export * from
-  "@t3tools/contracts"` once that package is publishable.
 - **The QML plugin runs inside the Omarchy Quickshell process.** Unsandboxed,
   inherits the user's permissions. Never spawn a second Quickshell. Never
   execute downloaded code without review.

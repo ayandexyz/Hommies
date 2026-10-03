@@ -46,12 +46,11 @@ There are three processes, and they only talk to each other over loopback HTTP:
 
 Item kinds are `permission | question | attention | finished`. The answer-surface preference is `topbar | cli`, shown in the UI as "Top bar" / "Claude CLI". In `cli` mode, questions are mirrored read-only in the bar and the agent's own prompt owns the answer. For OpenCode and Omacode, both the bar and the agent's TUI can answer, and whichever answers first wins.
 
-Public types live in `types.ts`. `localContracts.ts` holds local structural stand-ins for `@t3tools/contracts` until that package is published.
+Public types live in `types.ts`. `localContracts.ts` holds the shared branded ID types and provider kinds.
 
 ## Constraints (from AGENTS.md)
 
 - The HTTP surface (`/v1/*`, `port.json` format) is a contract with installed plugin copies and agent adapters, so keep it backward-compatible. A breaking change needs a new versioned path (`/v2/...`).
-- Do not vendor T3 Code source. Add missing features upstream (`~/Projects/githubProjects/t3code`) and consume them through npm.
 - The QML runs unsandboxed inside the user's Quickshell. Never start a second Quickshell process.
 - No telemetry, analytics, or update pings. The bridge is loopback-only.
 - TypeScript is strict, and `any` is not allowed in the bridge. QML follows the `omarchy.clock` plugin pattern: `BarWidget.qml` is the entry point and loads `Panel.qml`, with the same `moduleName` in both.
