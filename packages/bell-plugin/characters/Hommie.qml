@@ -4,8 +4,8 @@ import ".."
 
 // Hommie: the Omarchy mark as a face. The 15×15 frame from /usr/share/omarchy/icon.txt
 // with a pair of eyes in its empty middle. Every color comes from the active
-// Omarchy theme (tile = popup background, frame = accent or the mood's status
-// color, eyes = foreground), so it re-skins with `omarchy theme set`.
+// Omarchy theme (tile = popup background; frame and eyes = accent, or the
+// mood's status color), so it re-skins with `omarchy theme set`.
 //
 // Character contract (see FloatingBuddy.qml):
 //   property string mood   idle | working | thinking | approval | question
@@ -54,29 +54,44 @@ Item {
       "########.######"
     ]
     readonly property int grid: 15
-    // Frame cells with their angle around the center, for the sweep light.
-    readonly property var cells: {
+    // The inner ring as one path, in travel order for the thinking snake:
+    // top edge leftward from the gap, down the left side, along the bottom,
+    // up the right side, and back to the gap.
+    readonly property var innerPath: {
+      var path = [], i
+      for (i = 7; i >= 2; i--) path.push({ col: i, row: 2 })
+      for (i = 3; i <= 12; i++) path.push({ col: 2, row: i })
+      for (i = 3; i <= 12; i++) path.push({ col: i, row: 12 })
+      for (i = 11; i >= 2; i--) path.push({ col: 12, row: i })
+      path.push({ col: 11, row: 2 })
+      return path
+    }
+    // Every other frame cell: the outer ring and its connectors.
+    readonly property var outerCells: {
+      var inner = {}
+      for (var i = 0; i < innerPath.length; i++) inner[innerPath[i].col + "," + innerPath[i].row] = true
       var list = []
       for (var row = 0; row < grid; row++) {
         for (var col = 0; col < grid; col++) {
-          if (mark[row].charAt(col) === "#")
-            list.push({ col: col, row: row, angle: Math.atan2(row + 0.5 - grid / 2, col + 0.5 - grid / 2) })
+          if (mark[row].charAt(col) === "#" && !inner[col + "," + row]) list.push({ col: col, row: row })
         }
       }
       return list
     }
+    // Pixel "z" for the sleep animation.
+    readonly property var zGlyph: ["####", "..#.", ".#..", "####"]
 
-    // eye shape, badge, motion, and sweep speed (turns per second) per mood.
+    // eye shape, badge, motion, and snake speed (inner-ring cells per second) per mood.
     readonly property var states: ({
       idle: { eye: "pill", badge: "" },
-      working: { eye: "pill", badge: "dots", sweep: 0.9 },
-      thinking: { eye: "pill", badge: "dots", sweep: 0.35, ponder: true },
+      working: { eye: "pill", badge: "dots", snake: 30 },
+      thinking: { eye: "pill", badge: "dots", snake: 15 },
       approval: { eye: "wide", badge: "bang", bounces: true },
       question: { eye: "pill", badge: "question", tilt: 0.12 },
       error: { eye: "flat", badge: "dot" },
       ratelimit: { eye: "tired", badge: "dot", sweat: true },
       finished: { eye: "happy", badge: "dot" },
-      sleeping: { eye: "closed", badge: "", breathes: true, zz: true }
+      sleeping: { eye: "dash", badge: "", bobs: true, zz: true }
     })
 
     function moodColor(name) {
@@ -88,13 +103,12 @@ Item {
         case "error": return statusColors.error
         case "ratelimit": return statusColors.warning
         case "finished": return statusColors.success
-        case "sleeping": return statusColors.muted
         default: return Color.accent
       }
     }
 
     property var s: ({
-      eyeX: 0, eyeY: 0, tilt: 0, open: 1, sx: 1, sy: 1, oy: 0, ox: 0, badgeS: 0, sweepA: 0, sweepOn: 0,
+      eyeX: 0, eyeY: 0, tilt: 0, open: 1, sx: 1, sy: 1, oy: 0, ox: 0, badgeS: 0, snakeAt: 0, snakeOn: 0,
       col: [0.6, 0.8, 0.4]
     })
     property var cfg: states.idle
@@ -164,10 +178,10 @@ Item {
         var isZ = type === "z"
         particles.push({
           type: type,
-          x: (Math.random() - 0.5) * 0.9 + (isZ ? 0.55 : 0),
-          y: -0.7 - Math.random() * 0.2,
-          vx: (Math.random() - 0.5) * 0.35 + (isZ ? 0.18 : 0),
-          vy: -(0.45 + Math.random() * 0.35),
+          x: isZ ? 0.85 : (Math.random() - 0.5) * 0.9,
+          y: isZ ? -1.0 : -0.7 - Math.random() * 0.2,
+          vx: isZ ? 0.12 + Math.random() * 0.06 : (Math.random() - 0.5) * 0.35,
+          vy: isZ ? -(0.22 + Math.random() * 0.08) : -(0.45 + Math.random() * 0.35),
           age: -i * 0.14,
           life: 1.3 + Math.random() * 0.5,
           rot: Math.random() * Math.PI * 2,
@@ -198,36 +212,29 @@ Item {
       }
 
       var t = clock
-      // Eyes: follow the pointer; while pondering, look up and drift side
-      // to side; asleep, settle in the middle.
+      // Eyes follow the pointer; asleep, they settle in the middle.
       var tx = root.lookX
       var ty = root.lookY
-      if (cfg.ponder) {
-        tx = tx * 0.3 + Math.sin(t * 0.9) * 0.7
-        ty = ty * 0.3 - 0.75
-      }
-      if (state === "sleeping") { tx = 0; ty = 0.15 }
+      if (state === "sleeping") { tx = 0; ty = 0 }
 
       var kGen = 1 - Math.pow(0.0008, dt)
       var kLook = 1 - Math.pow(0.0025, dt)
       s.eyeX += (tx - s.eyeX) * kLook
       s.eyeY += (ty - s.eyeY) * kLook
 
-      var bounce = cfg.bounces ? -Math.abs(Math.sin(t * 5.2)) * 0.05 : 0
+      // Approval bounces; sleep bobs slowly up and down.
+      var bounce = cfg.bounces ? -Math.abs(Math.sin(t * 5.2)) * 0.05
+        : cfg.bobs ? Math.sin(t * 1.6) * 0.025 : 0
       if (!tweens.oy) s.oy += (bounce - s.oy) * kGen
 
       var tgSy = 1, tgSx = 1
-      if (cfg.breathes) {
-        tgSy = 1 + Math.sin(t * 1.8) * 0.03
-        tgSx = 1 - Math.sin(t * 1.8) * 0.015
-      }
       if (!tweens.tilt) s.tilt += ((cfg.tilt || 0) - s.tilt) * kGen
       if (!tweens.sy) s.sy += (tgSy - s.sy) * kGen
       if (!tweens.sx) s.sx += (tgSx - s.sx) * kGen
 
-      // Sweep light around the frame while working or thinking.
-      if (cfg.sweep) s.sweepA = (s.sweepA + dt * cfg.sweep * Math.PI * 2) % (Math.PI * 2)
-      s.sweepOn += ((cfg.sweep ? 1 : 0) - s.sweepOn) * kGen
+      // Snake running along the inner ring while working or thinking.
+      if (cfg.snake) s.snakeAt = (s.snakeAt + dt * cfg.snake) % innerPath.length
+      s.snakeOn += ((cfg.snake ? 1 : 0) - s.snakeOn) * kGen
 
       var target = moodColor(state)
       var kCol = 1 - Math.pow(0.002, dt)
@@ -291,8 +298,11 @@ Item {
       ctx.closePath()
     }
 
+    // W×H is the character's own size; the canvas is `overhang` larger on
+    // every side, so drawing is shifted in by that much.
     function draw(ctx, W, H) {
       ctx.reset()
+      ctx.translate(root.overhang, root.overhang)
       var side = Math.min(W, H) * 0.74
       var u = side / grid
       var R = side / 2
@@ -310,21 +320,26 @@ Item {
       ctx.fillStyle = rgba(Color.popups.background)
       ctx.fill()
 
-      // Frame, as one path so neighbouring cells don't leave seams.
+      // Outer ring, as one path so neighbouring cells don't leave seams.
       ctx.beginPath()
-      for (var i = 0; i < cells.length; i++) ctx.rect(cells[i].col * u, cells[i].row * u, u + 0.01, u + 0.01)
+      for (var i = 0; i < outerCells.length; i++) ctx.rect(outerCells[i].col * u, outerCells[i].row * u, u + 0.01, u + 0.01)
       ctx.fillStyle = rgba(s.col)
       ctx.fill()
 
-      // Sweep: brighten the cells near the rotating angle, with a tail.
-      if (s.sweepOn > 0.02) {
-        for (var k = 0; k < cells.length; k++) {
-          var d = s.sweepA - cells[k].angle
-          d = ((d % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2)
-          var glow = Math.max(0, 1 - d / 1.6) * s.sweepOn
-          if (glow < 0.03) continue
-          ctx.fillStyle = rgba(Color.foreground, 0.75 * glow)
-          ctx.fillRect(cells[k].col * u, cells[k].row * u, u + 0.01, u + 0.01)
+      // Inner ring: solid normally; while working or thinking it dims and
+      // a bright snake with a fading tail runs along it.
+      ctx.beginPath()
+      for (var j = 0; j < innerPath.length; j++) ctx.rect(innerPath[j].col * u, innerPath[j].row * u, u + 0.01, u + 0.01)
+      ctx.fillStyle = rgba(s.col, lerp(1, 0.22, s.snakeOn))
+      ctx.fill()
+      if (s.snakeOn > 0.02) {
+        var tail = 7
+        for (var k = 0; k <= tail; k++) {
+          var at = s.snakeAt - k
+          var index = ((Math.floor(at) % innerPath.length) + innerPath.length) % innerPath.length
+          var glow = (1 - k / (tail + 1)) * s.snakeOn * 0.78
+          ctx.fillStyle = rgba(s.col, glow)
+          ctx.fillRect(innerPath[index].col * u, innerPath[index].row * u, u + 0.01, u + 0.01)
         }
       }
 
@@ -338,14 +353,14 @@ Item {
     function drawEyes(ctx, u) {
       // Face area is the empty 9×9 middle (cells 3–11).
       var faceX = 3 * u, faceY = 3 * u, face = 9 * u
-      var ex = s.eyeX * u * 1.3
-      var ey = s.eyeY * u * 1.1
-      ctx.fillStyle = rgba(Color.foreground)
-      ctx.strokeStyle = rgba(Color.foreground)
+      var ex = s.eyeX * u * 1.6
+      var ey = s.eyeY * u * 1.6
+      ctx.fillStyle = rgba(s.col)
+      ctx.strokeStyle = rgba(s.col)
       for (var side = -1; side <= 1; side += 2) {
         ctx.save()
-        ctx.translate(faceX + face / 2 + side * u * 2 + ex, faceY + face * 0.47 + ey)
-        drawEyeShape(ctx, cfg.eye, u * 1.15, u * 2.3, side)
+        ctx.translate(faceX + face / 2 + side * u * 1.6 + ex, faceY + face * 0.36 + ey)
+        drawEyeShape(ctx, cfg.eye, u * 0.8, u * 1.8, side)
         ctx.restore()
       }
     }
@@ -355,8 +370,7 @@ Item {
         drawEyeShape(ctx, "pill", w * 1.18, h * 1.12, side)
       } else if (shape === "pill") {
         var hh = Math.max(h * s.open, w * 0.3)
-        roundRect(ctx, -w / 2, -hh / 2, w, hh, Math.min(w / 2, hh / 2))
-        ctx.fill()
+        ctx.fillRect(-w / 2, -hh / 2, w, hh)
       } else if (shape === "flat") {
         roundRect(ctx, -w * 0.8, -w * 0.22, w * 1.6, w * 0.44, w * 0.22)
         ctx.fill()
@@ -366,12 +380,9 @@ Item {
         ctx.beginPath()
         ctx.arc(0, h * 0.2, w * 0.85, Math.PI * 1.12, Math.PI * 1.88, false)
         ctx.stroke()
-      } else if (shape === "closed") {
-        ctx.lineWidth = w * 0.34
-        ctx.lineCap = "round"
-        ctx.beginPath()
-        ctx.arc(0, -h * 0.08, w * 0.8, Math.PI * 0.15, Math.PI * 0.85, false)
-        ctx.stroke()
+      } else if (shape === "dash") {
+        // Asleep: short flat dashes.
+        ctx.fillRect(-w * 0.85, -w * 0.22, w * 1.7, w * 0.44)
       } else if (shape === "tired") {
         roundRect(ctx, -w / 2, -h * 0.02, w, h * 0.36, w / 2)
         ctx.fill()
@@ -450,22 +461,30 @@ Item {
           ctx.quadraticCurveTo(-sz * 0.8, sz * 0.2, 0, -sz)
           ctx.fill()
         } else if (p.type === "z") {
-          ctx.fillStyle = rgba(Color.foreground, 0.85)
-          ctx.font = "bold " + Math.max(1, Math.round(sz * 1.9)) + "px sans-serif"
-          ctx.textAlign = "center"
-          ctx.textBaseline = "middle"
-          ctx.fillText("z", 0, 0)
+          // Pixel-art z in the mark's color, big or small.
+          var px = sz * (p.size > 0.19 ? 0.4 : 0.27)
+          ctx.fillStyle = rgba(s.col)
+          for (var zr = 0; zr < zGlyph.length; zr++) {
+            for (var zc = 0; zc < zGlyph[zr].length; zc++) {
+              if (zGlyph[zr].charAt(zc) === "#") ctx.fillRect((zc - 2) * px, (zr - 2) * px, px + 0.01, px + 0.01)
+            }
+          }
         }
         ctx.restore()
       }
     }
   }
 
+  // Extra room around the character so rising z's, sparks, and sweat
+  // drops aren't clipped. Drawing only: input still uses the item's bounds.
+  readonly property real overhang: Math.round(Math.min(width, height) * 0.45)
+
   Canvas {
     id: canvas
     anchors.fill: parent
+    anchors.margins: -root.overhang
     renderStrategy: Canvas.Cooperative
-    onPaint: engine.draw(getContext("2d"), width, height)
+    onPaint: engine.draw(getContext("2d"), root.width, root.height)
   }
 
   FrameAnimation {
