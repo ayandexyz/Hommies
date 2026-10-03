@@ -13,7 +13,7 @@ runs the daemon this plugin talks to.
 | `Service.qml` | Singleton that owns the bridge daemon process and hosts the floating character (polling, preferences, mood). |
 | `FloatingBuddy.qml` | The floating character window. Click it to open the agent tabs in a card beside it, right-click for its settings menu, drag it to move it. |
 | `FloatingPanel.qml` | The floating card: provider tabs, sessions, and items only (no settings, no outdated-hooks notice). A separate copy of `Panel.qml` so the two UIs can diverge. |
-| `characters/*.qml` | Swappable characters. `Mochi.qml` is a temporary, local-only stand-in (see the note at the top of the file). |
+| `characters/*.qml` | Swappable characters. `Hommie.qml` (the Omarchy mark with eyes) is the default. |
 | `bridge.js` | JS module loaded by the QML files. Talks to the bridge over `127.0.0.1`. |
 
 ## Floating character
@@ -31,7 +31,7 @@ bell still works. If you keep both, they share the same bridge preferences, so
 remove the bell from the bar to avoid toggling them from two places.
 
 To swap the character, add `characters/<Name>.qml` implementing the contract at
-the top of `characters/Mochi.qml` (`mood`, `lookX`, `lookY`, `running`,
+the top of `characters/Hommie.qml` (`mood`, `lookX`, `lookY`, `running`,
 `poke()`), then set `"character": "<Name>"` in `floating.json`.
 
 ## Answer surface
@@ -52,7 +52,7 @@ The widget setting **Answer agent questions in** controls question ownership:
 omarchy plugin validate packages/bell-plugin
 
 # Lint the QML against the installed shell
-qmllint -I "$OMARCHY_PATH/shell" packages/bell-plugin/BarWidget.qml packages/bell-plugin/Panel.qml packages/bell-plugin/ProviderLogo.qml packages/bell-plugin/Service.qml packages/bell-plugin/FloatingBuddy.qml packages/bell-plugin/characters/Mochi.qml
+qmllint -I "$OMARCHY_PATH/shell" packages/bell-plugin/BarWidget.qml packages/bell-plugin/Panel.qml packages/bell-plugin/ProviderLogo.qml packages/bell-plugin/Service.qml packages/bell-plugin/FloatingBuddy.qml packages/bell-plugin/characters/Hommie.qml
 ```
 
 To try the plugin locally, copy the folder into `~/.config/omarchy/plugins/`:

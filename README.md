@@ -7,11 +7,19 @@ them when you're away from the chat UI.
 ## Why
 
 YouTube, email, a meeting — and your agent has been waiting on a question for an hour.
-`agent-fold` lives in the Omarchy top bar as a bell that shows the pending count, grouped
-by agent, with a click-through to the thread.
+`agent-fold` puts **Hommie** on your screen: the Omarchy mark with a pair of eyes, floating
+wherever you drag it. Hommie shows at a glance whether your agents are working, waiting on
+you, failed, or done, and one click opens the pending items grouped by agent. The classic
+top-bar bell is still available.
 
 ## Features
 
+- **Hommie, a floating companion**: an Omarchy-mark face that follows the active theme's
+  colors. Its eyes follow your pointer; it bounces for approvals, tilts for questions,
+  shakes on errors, sweeps a light around its frame while agents work or think, hops when
+  a turn finishes, and falls asleep when nothing is running. Click it for the agent tabs,
+  right-click for settings, drag to move it. It shows over fullscreen windows unless you
+  turn **Over fullscreen** off.
 - **Answer from the bar**: permission requests and questions from Claude Code, Codex,
   OpenCode, and Omacode, grouped by agent and session. **Always** saves the rule for
   Claude Code and OpenCode, so the same request does not ask again.
@@ -38,7 +46,7 @@ This is a pnpm workspace with two packages:
 | Path | What it is |
 | --- | --- |
 | `packages/omarchy-bridge/` | A TypeScript npm package: the loopback HTTP bridge (`/v1/pending`, `/v1/respond`, `/v1/focus`, the provider routes, ...), the agent hooks, the OpenCode plugin, and the `agent-fold` setup CLI. Published to npm as `@thisisayande/agent-fold`. |
-| `packages/bell-plugin/` | The Omarchy plugin itself: `manifest.json`, `BarWidget.qml`, `Panel.qml`, `Service.qml`, and `bridge.js`, which talks to the bridge over HTTP. Distributed as a folder consumable by `omarchy plugin add`. |
+| `packages/bell-plugin/` | The Omarchy plugin itself: `manifest.json`, `Service.qml` (starts the bridge and hosts Hommie), `FloatingBuddy.qml` and `FloatingPanel.qml` (the floating character and its card), `characters/Hommie.qml`, the bar bell (`BarWidget.qml`, `Panel.qml`), and `bridge.js`, which talks to the bridge over HTTP. Distributed as a folder consumable by `omarchy plugin add`. |
 
 ## Status
 
@@ -47,9 +55,10 @@ Working end to end, not yet published to the plugin marketplace.
 - **Bridge** (`@thisisayande/agent-fold`): the HTTP API, the Claude Code and Codex
   command hooks, the OpenCode plugin, the generic `agent-fold-hook`, desktop
   notifications, sounds, and `agent-fold setup` are implemented and tested.
-- **Plugin**: the bar widget starts the bridge, restarts it when it exits, and polls
-  `/v1/pending` every 3 seconds. The panel answers permissions and questions and shows
-  live activity, failures, and the jump-to-terminal button.
+- **Plugin**: the service starts the bridge, restarts it when it exits, and polls
+  `/v1/pending` every 3 seconds. Hommie's card (and the bar bell's panel) answers
+  permissions and questions and shows live activity, failures, and the jump-to-terminal
+  button.
 - **Omacode** ships its own integration upstream.
 
 Not done yet:
