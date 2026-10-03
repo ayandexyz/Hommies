@@ -31,7 +31,7 @@ Item {
   readonly property bool overFullscreen: prefs.overFullscreen !== false
   /** File name (without .qml) in characters/. */
   readonly property string character: typeof prefs.character === "string" && /^[A-Za-z0-9_-]+$/.test(prefs.character)
-    ? prefs.character : "Mochi"
+    ? prefs.character : "Hommie"
 
   function refreshSnapshot() {
     Bridge.snapshot().then(function(next) {
