@@ -24,39 +24,49 @@ Panel {
   moduleName: "io.github.ayan-de.agent-fold"
   manageIpc: false
 
+  // Square, logo-only tab for the vertical rail. The agent name is the
+  // tooltip; the pending count is a badge in the corner.
   component ProviderTab: Button {
     id: providerTab
 
-    required property string providerId
-    required property string providerName
-    required property int pendingCount
+    // Not `required`: the tabs are Repeater delegates (see SessionRow).
+    property string providerId: ""
+    property string providerName: ""
+    property int pendingCount: 0
 
     text: ""
-    implicitHeight: tabContent.implicitHeight + Style.spacing.controlPaddingY * 2
+    tooltipText: providerName
 
-    Row {
-      id: tabContent
+    ProviderLogo {
       anchors.centerIn: parent
-      spacing: Style.spacing.controlGap
+      width: Style.space(18)
+      height: Style.space(18)
+      providerId: providerTab.providerId
+      tint: providerTab.selected
+        ? Style.selectedStateColor(providerTab.foreground, providerTab.accent)
+        : providerTab.foreground
+      fontFamily: providerTab.fontFamily
+    }
 
-      ProviderLogo {
-        anchors.verticalCenter: parent.verticalCenter
-        providerId: providerTab.providerId
-        tint: providerTab.selected
-          ? Style.selectedStateColor(providerTab.foreground, providerTab.accent)
-          : providerTab.foreground
-        fontFamily: providerTab.fontFamily
-      }
+    Rectangle {
+      visible: providerTab.pendingCount > 0
+      anchors.top: parent.top
+      anchors.right: parent.right
+      anchors.margins: Style.space(2)
+      height: tabCount.implicitHeight + Style.space(2)
+      width: Math.max(height, tabCount.implicitWidth + Style.space(6))
+      radius: height / 2
+      color: statusColors.attention
 
       Text {
-        anchors.verticalCenter: parent.verticalCenter
-        text: providerTab.providerName + "  " + providerTab.pendingCount
-        color: providerTab.selected
-          ? Style.selectedStateColor(providerTab.foreground, providerTab.accent)
-          : providerTab.foreground
+        id: tabCount
+        anchors.centerIn: parent
+        text: providerTab.pendingCount > 9 ? "9+" : String(providerTab.pendingCount)
+        textFormat: Text.PlainText
+        color: Color.background
         font.family: providerTab.fontFamily
-        font.pixelSize: providerTab.fontSize
-        font.bold: providerTab.selected
+        font.pixelSize: Style.font.caption * 0.85
+        font.bold: true
       }
     }
   }
@@ -435,10 +445,10 @@ Panel {
       }
     }
 
-    // Keep ordinary prompts compact (wide enough for the four provider tabs),
-    // then grow quickly enough for long option labels. FloatingBuddy still
-    // clamps the result to the monitor width.
-    var width = (showOtherTab ? 620 : 540) + Math.max(0, longest - 80) * 5
+    // Keep ordinary prompts compact, then grow quickly enough for long
+    // option labels. FloatingBuddy still clamps the result to the monitor
+    // width.
+    var width = 500 + Math.max(0, longest - 80) * 5
     return Style.space(Math.min(760, width))
   }
 
@@ -467,606 +477,565 @@ Panel {
       readonly property real contentHeight: content.implicitHeight
       onCloseRequested: root.close()
 
-      Column {
+      Item {
         id: content
         width: parent.width
-        spacing: Style.space(8)
+        implicitHeight: Math.max(providerTabs.implicitHeight, sessionColumn.implicitHeight)
 
-        Row {
+        // Vertical rail of logo-only provider tabs.
+        Column {
           id: providerTabs
-          width: parent.width
-          spacing: Style.space(8)
+          width: Style.space(40)
+          spacing: Style.space(6)
 
-          readonly property int tabCount: root.showOtherTab ? 5 : 4
-          readonly property real tabWidth: (width - spacing * (tabCount - 1)) / tabCount
+          Repeater {
+            model: root.showOtherTab
+              ? ["claude", "codex", "opencode", "omacode", "other"]
+              : ["claude", "codex", "opencode", "omacode"]
 
-          ProviderTab {
-            width: providerTabs.tabWidth
-            providerId: "claude"
-            providerName: "Claude"
-            pendingCount: root.providerCount("claude")
-            selected: root.selectedProvider === "claude"
-            bordered: true
-            foreground: root.barForeground
-            fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
-            fontSize: Style.font.body
-            onClicked: { root.selectedProvider = "claude"; root.selectedThreadId = "" }
-          }
-
-          ProviderTab {
-            width: providerTabs.tabWidth
-            providerId: "codex"
-            providerName: "Codex"
-            pendingCount: root.providerCount("codex")
-            selected: root.selectedProvider === "codex"
-            bordered: true
-            foreground: root.barForeground
-            fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
-            fontSize: Style.font.body
-            onClicked: { root.selectedProvider = "codex"; root.selectedThreadId = "" }
-          }
-
-          ProviderTab {
-            width: providerTabs.tabWidth
-            providerId: "opencode"
-            providerName: "OpenCode"
-            pendingCount: root.providerCount("opencode")
-            selected: root.selectedProvider === "opencode"
-            bordered: true
-            foreground: root.barForeground
-            fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
-            fontSize: Style.font.body
-            onClicked: { root.selectedProvider = "opencode"; root.selectedThreadId = "" }
-          }
-
-          ProviderTab {
-            width: providerTabs.tabWidth
-            providerId: "omacode"
-            providerName: "Omacode"
-            pendingCount: root.providerCount("omacode")
-            selected: root.selectedProvider === "omacode"
-            bordered: true
-            foreground: root.barForeground
-            fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
-            fontSize: Style.font.body
-            onClicked: { root.selectedProvider = "omacode"; root.selectedThreadId = "" }
-          }
-
-          ProviderTab {
-            visible: root.showOtherTab
-            width: providerTabs.tabWidth
-            providerId: "other"
-            providerName: "Other"
-            pendingCount: root.providerCount("other")
-            selected: root.selectedProvider === "other"
-            bordered: true
-            foreground: root.barForeground
-            fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
-            fontSize: Style.font.body
-            onClicked: { root.selectedProvider = "other"; root.selectedThreadId = "" }
-          }
-        }
-
-        Text {
-          visible: root.currentThreads.length === 0
-          width: parent.width
-          topPadding: Style.space(12)
-          bottomPadding: Style.space(12)
-          text: "No active " + root.providerName(root.selectedProvider) + " sessions"
-          color: root.barForeground
-          opacity: 0.65
-          font.family: root.bar ? root.bar.fontFamily : Style.font.family
-          font.pixelSize: Style.font.body
-          horizontalAlignment: Text.AlignHCenter
-        }
-
-        Repeater {
-          model: root.openThread ? [] : root.currentThreads
-          delegate: SessionRow {
-            width: parent.width
-            threadData: modelData
-            foreground: root.barForeground
-            fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
-            fontSize: Style.font.body
-            onClicked: root.selectedThreadId = modelData.threadId
-          }
-        }
-
-        Repeater {
-          model: root.openThread ? [root.openThread] : []
-          delegate: Column {
-            id: threadColumn
-            property var threadData: modelData
-            width: parent.width
-            spacing: Style.space(4)
-            Button {
-              width: parent.width
-              text: "\u2039  " + root.sessionLabel(modelData)
-              leftAlign: true
+            delegate: ProviderTab {
+              width: providerTabs.width
+              height: providerTabs.width
+              providerId: modelData
+              providerName: root.providerName(modelData)
+              pendingCount: root.providerCount(modelData)
+              selected: root.selectedProvider === modelData
               bordered: true
               foreground: root.barForeground
               fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
-              fontSize: Style.font.body
-              onClicked: root.selectedThreadId = ""
+              onClicked: { root.selectedProvider = modelData; root.selectedThreadId = "" }
             }
-            Button {
-              visible: threadColumn.threadData.activity ? threadColumn.threadData.activity.focusable === true : false
+          }
+        }
+
+        Column {
+          id: sessionColumn
+          anchors.left: providerTabs.right
+          anchors.leftMargin: Style.space(10)
+          anchors.right: parent.right
+          spacing: Style.space(8)
+
+          Text {
+            visible: root.currentThreads.length === 0
+            width: parent.width
+            topPadding: Style.space(12)
+            bottomPadding: Style.space(12)
+            text: "No active " + root.providerName(root.selectedProvider) + " sessions"
+            color: root.barForeground
+            opacity: 0.65
+            font.family: root.bar ? root.bar.fontFamily : Style.font.family
+            font.pixelSize: Style.font.body
+            horizontalAlignment: Text.AlignHCenter
+          }
+
+          Repeater {
+            model: root.openThread ? [] : root.currentThreads
+            delegate: SessionRow {
               width: parent.width
-              text: "↗  Go to terminal"
-              bordered: true
-              foreground: statusColors.attention
-              background: Util.alpha(statusColors.attention, 0.08)
+              threadData: modelData
+              foreground: root.barForeground
               fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
-              fontSize: Style.font.bodySmall
-              onClicked: root.focusTerminal(threadColumn.threadData)
+              fontSize: Style.font.body
+              onClicked: root.selectedThreadId = modelData.threadId
             }
-            Column {
-              visible: root.recentSteps(threadColumn.threadData).length > 0
+          }
+
+          Repeater {
+            model: root.openThread ? [root.openThread] : []
+            delegate: Column {
+              id: threadColumn
+              property var threadData: modelData
               width: parent.width
-              spacing: Style.space(2)
-
-              Row {
-                id: activityHeader
+              spacing: Style.space(4)
+              Button {
                 width: parent.width
-                spacing: Style.space(6)
-
-                readonly property bool busy: root.threadBusy(threadColumn.threadData)
-
-                PulseDot {
-                  visible: activityHeader.busy
-                  anchors.verticalCenter: parent.verticalCenter
-                  tone: statusColors.working
-                  running: activityHeader.busy
-                  size: Style.space(6)
-                }
-                Text {
-                  text: threadColumn.threadData.activity && threadColumn.threadData.activity.state === "working" ? "Working"
-                    : threadColumn.threadData.activity && threadColumn.threadData.activity.state === "thinking" ? "Thinking"
-                    : "Recent activity"
-                  color: activityHeader.busy ? statusColors.working : root.barForeground
-                  opacity: activityHeader.busy ? 1 : 0.72
-                  font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                  font.pixelSize: Style.font.caption
-                  font.bold: true
-                }
+                text: "\u2039  " + root.sessionLabel(modelData)
+                leftAlign: true
+                bordered: true
+                foreground: root.barForeground
+                fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+                fontSize: Style.font.body
+                onClicked: root.selectedThreadId = ""
               }
+              Button {
+                visible: threadColumn.threadData.activity ? threadColumn.threadData.activity.focusable === true : false
+                width: parent.width
+                text: "↗  Go to terminal"
+                bordered: true
+                foreground: statusColors.attention
+                background: Util.alpha(statusColors.attention, 0.08)
+                fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+                fontSize: Style.font.bodySmall
+                onClicked: root.focusTerminal(threadColumn.threadData)
+              }
+              Column {
+                visible: root.recentSteps(threadColumn.threadData).length > 0
+                width: parent.width
+                spacing: Style.space(2)
 
-              Repeater {
-                model: root.recentSteps(threadColumn.threadData)
-                delegate: Text {
+                Row {
+                  id: activityHeader
                   width: parent.width
-                  leftPadding: Style.space(8)
-                  text: modelData
-                  textFormat: Text.PlainText
-                  elide: Text.ElideRight
-                  color: root.barForeground
-                  opacity: index === root.recentSteps(threadColumn.threadData).length - 1 ? 0.9 : 0.55
-                  font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                  font.pixelSize: Style.font.caption
-                }
-              }
-            }
-            Repeater {
-              model: modelData.items
-              delegate: Item {
-                id: itemDelegate
-
-                property var itemData: modelData
-                property var draftAnswers: ({})
-                // XMLHttpRequest JSON arrays can arrive in QML as array-like
-                // QVariant values, for which Array.isArray() returns false.
-                // Repeater accepts those values directly, so only guard for a
-                // missing field instead of discarding a valid question list.
-                readonly property var questions: itemData.kind === "question" && itemData.questions
-                  ? itemData.questions : []
-                readonly property bool answerInTopbar: itemData.answerSurface !== "cli"
-                // Multi-question prompts page one question at a time so a long
-                // list never pushes the panel off screen.
-                property int questionPage: 0
-                readonly property int currentQuestion: Math.max(0,
-                  Math.min(questionPage, questions.length - 1))
-
-                function showQuestion(index) {
-                  questionPage = Math.max(0, Math.min(index, questions.length - 1))
-                }
-
-                function answerFor(questionId) {
-                  return draftAnswers[questionId]
-                }
-
-                function optionSelected(questionId, label) {
-                  var answer = answerFor(questionId)
-                  return Array.isArray(answer) ? answer.indexOf(label) >= 0 : answer === label
-                }
-
-                function chooseOption(question, label) {
-                  if (!answerInTopbar) return
-                  var next = Object.assign({}, draftAnswers)
-                  if (question.multiSelect) {
-                    var selected = Array.isArray(next[question.id]) ? next[question.id].slice() : []
-                    var index = selected.indexOf(label)
-                    if (index >= 0) selected.splice(index, 1)
-                    else selected.push(label)
-                    next[question.id] = selected
-                  } else {
-                    next[question.id] = label
-                  }
-                  draftAnswers = next
-                  if (!question.multiSelect) showQuestion(currentQuestion + 1)
-                }
-
-                function setCustomAnswer(questionId, answer) {
-                  if (!answerInTopbar) return
-                  var next = Object.assign({}, draftAnswers)
-                  next[questionId] = answer
-                  draftAnswers = next
-                }
-
-                function readyToSubmit() {
-                  if (questions.length === 0) return false
-                  for (var index = 0; index < questions.length; index++) {
-                    var answer = answerFor(questions[index].id)
-                    if (Array.isArray(answer)) {
-                      if (answer.length === 0) return false
-                    } else if (typeof answer !== "string" || answer.trim().length === 0) {
-                      return false
-                    }
-                  }
-                  return true
-                }
-
-                function submitAnswers() {
-                  if (!readyToSubmit()) return
-                  var answers = {}
-                  for (var index = 0; index < questions.length; index++) {
-                    var question = questions[index]
-                    var answer = answerFor(question.id)
-                    answers[question.id] = Array.isArray(answer) ? answer.join(", ") : answer.trim()
-                  }
-                  Bridge.respond({
-                    threadId: threadColumn.threadData.threadId,
-                    requestId: itemData.id,
-                    answers: answers
-                  }).then(function() {
-                    itemDelegate.draftAnswers = ({})
-                    root.close()
-                  }).catch(function(error) {
-                    console.warn("agent-fold answer failed:", error)
-                  })
-                }
-
-                // "cancel" releases the hook without a decision, so the
-                // provider falls back to its native terminal prompt. For
-                // attention items any decision simply dismisses them.
-                function respondPermission(decision) {
-                  Bridge.respond({
-                    threadId: threadColumn.threadData.threadId,
-                    requestId: itemData.id,
-                    decision: decision
-                  }).then(function() {
-                    if (root.hostWidget && typeof root.hostWidget.refreshSnapshot === "function")
-                      root.hostWidget.refreshSnapshot()
-                  }).catch(function(error) {
-                    console.warn("agent-fold permission response failed:", error)
-                  })
-                }
-
-                readonly property color tone: root.itemTone(itemData)
-                readonly property real cardPadding: Style.space(8)
-                property real entrance: 1
-
-                width: parent.width
-                implicitHeight: itemColumn.implicitHeight + cardPadding * 2
-                opacity: entrance
-                transform: Translate { id: itemShift }
-
-                Component.onCompleted: if (root.firstSighting("item:" + itemData.id)) itemEnter.start()
-
-                ParallelAnimation {
-                  id: itemEnter
-                  NumberAnimation { target: itemDelegate; property: "entrance"; from: 0; to: 1; duration: 260; easing.type: Easing.OutCubic }
-                  NumberAnimation { target: itemShift; property: "y"; from: -Style.space(8); to: 0; duration: 320; easing.type: Easing.OutCubic }
-                }
-
-                StatusCard {
-                  anchors.fill: parent
-                  tone: itemDelegate.tone
-                }
-
-                Column {
-                  id: itemColumn
-                  x: itemDelegate.cardPadding + Style.space(3)
-                  y: itemDelegate.cardPadding
-                  width: parent.width - x - itemDelegate.cardPadding
                   spacing: Style.space(6)
-                  Row {
-                  id: itemRow
-                  visible: itemDelegate.itemData.kind !== "question"
-                  width: parent.width
-                  spacing: Style.space(8)
+
+                  readonly property bool busy: root.threadBusy(threadColumn.threadData)
+
+                  PulseDot {
+                    visible: activityHeader.busy
+                    anchors.verticalCenter: parent.verticalCenter
+                    tone: statusColors.working
+                    running: activityHeader.busy
+                    size: Style.space(6)
+                  }
                   Text {
-                    text: itemDelegate.itemData.failure ? "!"
-                      : itemDelegate.itemData.kind === "attention" ? "\u21a9"
-                      : itemDelegate.itemData.kind === "finished" ? "\u2713" : "!"
-                    color: itemDelegate.tone
+                    text: threadColumn.threadData.activity && threadColumn.threadData.activity.state === "working" ? "Working"
+                      : threadColumn.threadData.activity && threadColumn.threadData.activity.state === "thinking" ? "Thinking"
+                      : "Recent activity"
+                    color: activityHeader.busy ? statusColors.working : root.barForeground
+                    opacity: activityHeader.busy ? 1 : 0.72
                     font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                    font.pixelSize: Style.font.body
+                    font.pixelSize: Style.font.caption
                     font.bold: true
                   }
+                }
+
+                Repeater {
+                  model: root.recentSteps(threadColumn.threadData)
+                  delegate: Text {
+                    width: parent.width
+                    leftPadding: Style.space(8)
+                    text: modelData
+                    textFormat: Text.PlainText
+                    elide: Text.ElideRight
+                    color: root.barForeground
+                    opacity: index === root.recentSteps(threadColumn.threadData).length - 1 ? 0.9 : 0.55
+                    font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                    font.pixelSize: Style.font.caption
+                  }
+                }
+              }
+              Repeater {
+                model: modelData.items
+                delegate: Item {
+                  id: itemDelegate
+
+                  property var itemData: modelData
+                  property var draftAnswers: ({})
+                  // XMLHttpRequest JSON arrays can arrive in QML as array-like
+                  // QVariant values, for which Array.isArray() returns false.
+                  // Repeater accepts those values directly, so only guard for a
+                  // missing field instead of discarding a valid question list.
+                  readonly property var questions: itemData.kind === "question" && itemData.questions
+                    ? itemData.questions : []
+                  readonly property bool answerInTopbar: itemData.answerSurface !== "cli"
+                  // Multi-question prompts page one question at a time so a long
+                  // list never pushes the panel off screen.
+                  property int questionPage: 0
+                  readonly property int currentQuestion: Math.max(0,
+                    Math.min(questionPage, questions.length - 1))
+
+                  function showQuestion(index) {
+                    questionPage = Math.max(0, Math.min(index, questions.length - 1))
+                  }
+
+                  function answerFor(questionId) {
+                    return draftAnswers[questionId]
+                  }
+
+                  function optionSelected(questionId, label) {
+                    var answer = answerFor(questionId)
+                    return Array.isArray(answer) ? answer.indexOf(label) >= 0 : answer === label
+                  }
+
+                  function chooseOption(question, label) {
+                    if (!answerInTopbar) return
+                    var next = Object.assign({}, draftAnswers)
+                    if (question.multiSelect) {
+                      var selected = Array.isArray(next[question.id]) ? next[question.id].slice() : []
+                      var index = selected.indexOf(label)
+                      if (index >= 0) selected.splice(index, 1)
+                      else selected.push(label)
+                      next[question.id] = selected
+                    } else {
+                      next[question.id] = label
+                    }
+                    draftAnswers = next
+                    if (!question.multiSelect) showQuestion(currentQuestion + 1)
+                  }
+
+                  function setCustomAnswer(questionId, answer) {
+                    if (!answerInTopbar) return
+                    var next = Object.assign({}, draftAnswers)
+                    next[questionId] = answer
+                    draftAnswers = next
+                  }
+
+                  function readyToSubmit() {
+                    if (questions.length === 0) return false
+                    for (var index = 0; index < questions.length; index++) {
+                      var answer = answerFor(questions[index].id)
+                      if (Array.isArray(answer)) {
+                        if (answer.length === 0) return false
+                      } else if (typeof answer !== "string" || answer.trim().length === 0) {
+                        return false
+                      }
+                    }
+                    return true
+                  }
+
+                  function submitAnswers() {
+                    if (!readyToSubmit()) return
+                    var answers = {}
+                    for (var index = 0; index < questions.length; index++) {
+                      var question = questions[index]
+                      var answer = answerFor(question.id)
+                      answers[question.id] = Array.isArray(answer) ? answer.join(", ") : answer.trim()
+                    }
+                    Bridge.respond({
+                      threadId: threadColumn.threadData.threadId,
+                      requestId: itemData.id,
+                      answers: answers
+                    }).then(function() {
+                      itemDelegate.draftAnswers = ({})
+                      root.close()
+                    }).catch(function(error) {
+                      console.warn("agent-fold answer failed:", error)
+                    })
+                  }
+
+                  // "cancel" releases the hook without a decision, so the
+                  // provider falls back to its native terminal prompt. For
+                  // attention items any decision simply dismisses them.
+                  function respondPermission(decision) {
+                    Bridge.respond({
+                      threadId: threadColumn.threadData.threadId,
+                      requestId: itemData.id,
+                      decision: decision
+                    }).then(function() {
+                      if (root.hostWidget && typeof root.hostWidget.refreshSnapshot === "function")
+                        root.hostWidget.refreshSnapshot()
+                    }).catch(function(error) {
+                      console.warn("agent-fold permission response failed:", error)
+                    })
+                  }
+
+                  readonly property color tone: root.itemTone(itemData)
+                  readonly property real cardPadding: Style.space(8)
+                  property real entrance: 1
+
+                  width: parent.width
+                  implicitHeight: itemColumn.implicitHeight + cardPadding * 2
+                  opacity: entrance
+                  transform: Translate { id: itemShift }
+
+                  Component.onCompleted: if (root.firstSighting("item:" + itemData.id)) itemEnter.start()
+
+                  ParallelAnimation {
+                    id: itemEnter
+                    NumberAnimation { target: itemDelegate; property: "entrance"; from: 0; to: 1; duration: 260; easing.type: Easing.OutCubic }
+                    NumberAnimation { target: itemShift; property: "y"; from: -Style.space(8); to: 0; duration: 320; easing.type: Easing.OutCubic }
+                  }
+
+                  StatusCard {
+                    anchors.fill: parent
+                    tone: itemDelegate.tone
+                  }
+
+                  Column {
+                    id: itemColumn
+                    x: itemDelegate.cardPadding + Style.space(3)
+                    y: itemDelegate.cardPadding
+                    width: parent.width - x - itemDelegate.cardPadding
+                    spacing: Style.space(6)
+                    Row {
+                    id: itemRow
+                    visible: itemDelegate.itemData.kind !== "question"
+                    width: parent.width
+                    spacing: Style.space(8)
+                    Text {
+                      text: itemDelegate.itemData.failure ? "!"
+                        : itemDelegate.itemData.kind === "attention" ? "\u21a9"
+                        : itemDelegate.itemData.kind === "finished" ? "\u2713" : "!"
+                      color: itemDelegate.tone
+                      font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                      font.pixelSize: Style.font.body
+                      font.bold: true
+                    }
+                    Text {
+                      text: itemDelegate.itemData.summary
+                      textFormat: Text.PlainText
+                      color: root.barForeground
+                      font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                      font.pixelSize: Style.font.body
+                      wrapMode: Text.WrapAtWordBoundaryOrAnywhere
+                      width: itemRow.width - 32
+                    }
+                  }
+
+                  Item {
+                    id: questionPager
+                    visible: itemDelegate.questions.length > 1
+                    width: parent.width
+                    height: visible ? Style.space(28) : 0
+
+                    Button {
+                      id: previousQuestion
+                      anchors.left: parent.left
+                      width: Style.space(40)
+                      height: parent.height
+                      text: "‹"
+                      bordered: true
+                      foreground: root.barForeground
+                      fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+                      fontSize: Style.font.body
+                      opacity: itemDelegate.currentQuestion > 0 ? 1 : 0.35
+                      onClicked: itemDelegate.showQuestion(itemDelegate.currentQuestion - 1)
+                    }
+
+                    Text {
+                      anchors.centerIn: parent
+                      text: (itemDelegate.currentQuestion + 1) + " / " + itemDelegate.questions.length
+                      color: root.barForeground
+                      font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                      font.pixelSize: Style.font.body
+                      font.bold: true
+                    }
+
+                    Button {
+                      anchors.right: parent.right
+                      width: previousQuestion.width
+                      height: parent.height
+                      text: "›"
+                      bordered: true
+                      foreground: root.barForeground
+                      fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+                      fontSize: Style.font.body
+                      opacity: itemDelegate.currentQuestion < itemDelegate.questions.length - 1 ? 1 : 0.35
+                      onClicked: itemDelegate.showQuestion(itemDelegate.currentQuestion + 1)
+                    }
+                  }
+
+                  Repeater {
+                    model: itemDelegate.questions
+
+                    delegate: Column {
+                      id: questionColumn
+                      property var questionData: modelData
+                      visible: index === itemDelegate.currentQuestion
+                      width: itemColumn.width
+                      spacing: Style.space(4)
+
+                      Text {
+                        width: parent.width
+                        text: questionColumn.questionData.header
+                        color: root.barForeground
+                        opacity: 0.72
+                        font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                        font.pixelSize: Style.font.caption
+                        font.bold: true
+                      }
+
+                      Text {
+                        width: parent.width
+                        text: questionColumn.questionData.question
+                        color: root.barForeground
+                        font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                        font.pixelSize: Style.font.body
+                        wrapMode: Text.WrapAtWordBoundaryOrAnywhere
+                      }
+
+                      Repeater {
+                        model: questionColumn.questionData.options
+
+                        delegate: Column {
+                          id: optionColumn
+                          property var optionData: modelData
+                          width: questionColumn.width
+                          spacing: Style.space(2)
+
+                          Button {
+                            id: optionButton
+                            width: parent.width
+                            height: Math.max(Style.space(32), optionLabel.implicitHeight
+                              + verticalPadding * 2 + Style.normalBorderWidth * 2)
+                            text: ""
+                            leftAlign: true
+                            bordered: true
+                            selected: itemDelegate.optionSelected(
+                              questionColumn.questionData.id, optionColumn.optionData.label)
+                            foreground: root.barForeground
+                            fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+                            fontSize: Style.font.bodySmall
+                            opacity: itemDelegate.answerInTopbar ? 1 : 0.72
+                            onClicked: itemDelegate.chooseOption(
+                              questionColumn.questionData, optionColumn.optionData.label)
+
+                            Text {
+                              id: optionLabel
+                              anchors.left: parent.left
+                              anchors.right: parent.right
+                              anchors.verticalCenter: parent.verticalCenter
+                              anchors.leftMargin: optionButton.horizontalPadding + Style.normalBorderWidth
+                              anchors.rightMargin: optionButton.horizontalPadding + Style.normalBorderWidth
+                              textFormat: Text.PlainText
+                              text: optionColumn.optionData.label
+                              color: optionButton.selected
+                                ? Style.selectedStateColor(optionButton.foreground, optionButton.accent)
+                                : optionButton.foreground
+                              font.family: optionButton.fontFamily
+                              font.pixelSize: optionButton.fontSize
+                              font.bold: optionButton.selected
+                              wrapMode: Text.WrapAtWordBoundaryOrAnywhere
+                            }
+                          }
+
+                          Text {
+                            visible: optionColumn.optionData.description !== undefined
+                              && optionColumn.optionData.description !== ""
+                            width: parent.width
+                            leftPadding: Style.space(8)
+                            rightPadding: Style.space(8)
+                            text: optionColumn.optionData.description || ""
+                            color: root.barForeground
+                            opacity: 0.62
+                            font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                            font.pixelSize: Style.font.caption
+                            wrapMode: Text.WrapAtWordBoundaryOrAnywhere
+                          }
+                        }
+                      }
+
+                      TextInput {
+                        visible: itemDelegate.answerInTopbar
+                        width: parent.width
+                        color: root.barForeground
+                        font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                        font.pixelSize: Style.font.body
+                        text: ""
+                        focus: false
+                        clip: true
+                        onTextEdited: itemDelegate.setCustomAnswer(questionColumn.questionData.id, text)
+                        onAccepted: itemDelegate.submitAnswers()
+                      }
+                    }
+                  }
+
                   Text {
-                    text: itemDelegate.itemData.summary
+                    visible: itemDelegate.itemData.kind === "question"
+                      && itemDelegate.questions.length === 0
+                    width: parent.width
+                    text: itemDelegate.itemData.summary || (root.agentName(itemDelegate.itemData) + " needs your input")
                     textFormat: Text.PlainText
                     color: root.barForeground
                     font.family: root.bar ? root.bar.fontFamily : Style.font.family
                     font.pixelSize: Style.font.body
                     wrapMode: Text.WrapAtWordBoundaryOrAnywhere
-                    width: itemRow.width - 32
-                  }
-                }
-
-                Item {
-                  id: questionPager
-                  visible: itemDelegate.questions.length > 1
-                  width: parent.width
-                  height: visible ? Style.space(28) : 0
-
-                  Button {
-                    id: previousQuestion
-                    anchors.left: parent.left
-                    width: Style.space(40)
-                    height: parent.height
-                    text: "‹"
-                    bordered: true
-                    foreground: root.barForeground
-                    fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
-                    fontSize: Style.font.body
-                    opacity: itemDelegate.currentQuestion > 0 ? 1 : 0.35
-                    onClicked: itemDelegate.showQuestion(itemDelegate.currentQuestion - 1)
                   }
 
                   Text {
-                    anchors.centerIn: parent
-                    text: (itemDelegate.currentQuestion + 1) + " / " + itemDelegate.questions.length
+                    visible: itemDelegate.itemData.kind === "question"
+                    text: itemDelegate.answerInTopbar
+                      ? (itemDelegate.questions.length > 0
+                          ? "Select or type an answer for every question"
+                          : "This question has no structured input")
+                      : "Answer this question in " + root.agentName(itemDelegate.itemData)
                     color: root.barForeground
+                    opacity: 0.65
                     font.family: root.bar ? root.bar.fontFamily : Style.font.family
                     font.pixelSize: Style.font.body
-                    font.bold: true
                   }
 
                   Button {
-                    anchors.right: parent.right
-                    width: previousQuestion.width
-                    height: parent.height
-                    text: "›"
+                    visible: itemDelegate.itemData.kind === "question"
+                      && itemDelegate.answerInTopbar
+                      && itemDelegate.questions.length > 0
+                    width: parent.width
+                    text: "Send answer"
+                    bordered: true
+                    foreground: itemDelegate.readyToSubmit() ? statusColors.attention : root.barForeground
+                    background: itemDelegate.readyToSubmit() ? Util.alpha(statusColors.attention, 0.14) : "transparent"
+                    fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+                    fontSize: Style.font.body
+                    opacity: itemDelegate.readyToSubmit() ? 1 : 0.5
+                    Behavior on opacity { NumberAnimation { duration: 160 } }
+                    onClicked: itemDelegate.submitAnswers()
+                  }
+
+                  Text {
+                    visible: itemDelegate.itemData.kind === "attention" || itemDelegate.itemData.kind === "finished"
+                    text: itemDelegate.itemData.failure === "ratelimit"
+                      ? root.agentName(itemDelegate.itemData) + " stopped on a usage limit; retry in the terminal when it resets"
+                      : itemDelegate.itemData.failure
+                      ? root.agentName(itemDelegate.itemData) + " stopped on an error; retry in the terminal"
+                      : itemDelegate.itemData.kind === "finished"
+                      ? root.agentName(itemDelegate.itemData) + " finished this turn"
+                      : root.agentName(itemDelegate.itemData) + " is waiting for your reply in the terminal"
+                    color: root.barForeground
+                    opacity: 0.65
+                    font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                    font.pixelSize: Style.font.caption
+                  }
+
+                  Button {
+                    visible: itemDelegate.itemData.kind === "attention" || itemDelegate.itemData.kind === "finished"
+                    width: parent.width
+                    text: "Dismiss"
                     bordered: true
                     foreground: root.barForeground
                     fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
-                    fontSize: Style.font.body
-                    opacity: itemDelegate.currentQuestion < itemDelegate.questions.length - 1 ? 1 : 0.35
-                    onClicked: itemDelegate.showQuestion(itemDelegate.currentQuestion + 1)
+                    fontSize: Style.font.bodySmall
+                    onClicked: itemDelegate.respondPermission("cancel")
                   }
-                }
 
-                Repeater {
-                  model: itemDelegate.questions
-
-                  delegate: Column {
-                    id: questionColumn
-                    property var questionData: modelData
-                    visible: index === itemDelegate.currentQuestion
-                    width: itemColumn.width
+                  Row {
+                    id: permissionRow
+                    visible: itemDelegate.itemData.kind === "permission"
+                    width: parent.width
                     spacing: Style.space(4)
 
-                    Text {
-                      width: parent.width
-                      text: questionColumn.questionData.header
-                      color: root.barForeground
-                      opacity: 0.72
-                      font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                      font.pixelSize: Style.font.caption
-                      font.bold: true
-                    }
+                    // "Always" only appears when the agent can remember the rule
+                    // (Claude with permission suggestions, OpenCode).
+                    readonly property var choices: itemDelegate.itemData.canAcceptAlways === true
+                      ? [
+                          { label: "✓ Allow", decision: "accept" },
+                          { label: "✓✓ Always", decision: "acceptAlways" },
+                          { label: "✕ Deny", decision: "decline" },
+                          { label: "Ask in CLI", decision: "cancel" }
+                        ]
+                      : [
+                          { label: "✓ Allow", decision: "accept" },
+                          { label: "✕ Deny", decision: "decline" },
+                          { label: "Ask in CLI", decision: "cancel" }
+                        ]
 
-                    Text {
-                      width: parent.width
-                      text: questionColumn.questionData.question
-                      color: root.barForeground
-                      font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                      font.pixelSize: Style.font.body
-                      wrapMode: Text.WrapAtWordBoundaryOrAnywhere
+                    function choiceTone(decision) {
+                      return decision === "accept" ? statusColors.success
+                        : decision === "acceptAlways" ? statusColors.attention
+                        : decision === "decline" ? statusColors.error
+                        : root.barForeground
                     }
 
                     Repeater {
-                      model: questionColumn.questionData.options
+                      model: permissionRow.choices
 
-                      delegate: Column {
-                        id: optionColumn
-                        property var optionData: modelData
-                        width: questionColumn.width
-                        spacing: Style.space(2)
+                      delegate: Button {
+                        readonly property color tone: permissionRow.choiceTone(modelData.decision)
+                        readonly property bool plain: modelData.decision === "cancel"
 
-                        Button {
-                          id: optionButton
-                          width: parent.width
-                          height: Math.max(Style.space(32), optionLabel.implicitHeight
-                            + verticalPadding * 2 + Style.normalBorderWidth * 2)
-                          text: ""
-                          leftAlign: true
-                          bordered: true
-                          selected: itemDelegate.optionSelected(
-                            questionColumn.questionData.id, optionColumn.optionData.label)
-                          foreground: root.barForeground
-                          fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
-                          fontSize: Style.font.bodySmall
-                          opacity: itemDelegate.answerInTopbar ? 1 : 0.72
-                          onClicked: itemDelegate.chooseOption(
-                            questionColumn.questionData, optionColumn.optionData.label)
-
-                          Text {
-                            id: optionLabel
-                            anchors.left: parent.left
-                            anchors.right: parent.right
-                            anchors.verticalCenter: parent.verticalCenter
-                            anchors.leftMargin: optionButton.horizontalPadding + Style.normalBorderWidth
-                            anchors.rightMargin: optionButton.horizontalPadding + Style.normalBorderWidth
-                            textFormat: Text.PlainText
-                            text: optionColumn.optionData.label
-                            color: optionButton.selected
-                              ? Style.selectedStateColor(optionButton.foreground, optionButton.accent)
-                              : optionButton.foreground
-                            font.family: optionButton.fontFamily
-                            font.pixelSize: optionButton.fontSize
-                            font.bold: optionButton.selected
-                            wrapMode: Text.WrapAtWordBoundaryOrAnywhere
-                          }
-                        }
-
-                        Text {
-                          visible: optionColumn.optionData.description !== undefined
-                            && optionColumn.optionData.description !== ""
-                          width: parent.width
-                          leftPadding: Style.space(8)
-                          rightPadding: Style.space(8)
-                          text: optionColumn.optionData.description || ""
-                          color: root.barForeground
-                          opacity: 0.62
-                          font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                          font.pixelSize: Style.font.caption
-                          wrapMode: Text.WrapAtWordBoundaryOrAnywhere
-                        }
+                        width: (permissionRow.width - permissionRow.spacing * (permissionRow.choices.length - 1))
+                          / permissionRow.choices.length
+                        text: modelData.label
+                        bordered: true
+                        foreground: tone
+                        background: plain ? "transparent" : Util.alpha(tone, modelData.decision === "accept" ? 0.18 : 0.1)
+                        opacity: plain ? 0.8 : 1
+                        fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+                        fontSize: Style.font.bodySmall
+                        onClicked: itemDelegate.respondPermission(modelData.decision)
                       }
                     }
-
-                    TextInput {
-                      visible: itemDelegate.answerInTopbar
-                      width: parent.width
-                      color: root.barForeground
-                      font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                      font.pixelSize: Style.font.body
-                      text: ""
-                      focus: false
-                      clip: true
-                      onTextEdited: itemDelegate.setCustomAnswer(questionColumn.questionData.id, text)
-                      onAccepted: itemDelegate.submitAnswers()
-                    }
                   }
-                }
-
-                Text {
-                  visible: itemDelegate.itemData.kind === "question"
-                    && itemDelegate.questions.length === 0
-                  width: parent.width
-                  text: itemDelegate.itemData.summary || (root.agentName(itemDelegate.itemData) + " needs your input")
-                  textFormat: Text.PlainText
-                  color: root.barForeground
-                  font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                  font.pixelSize: Style.font.body
-                  wrapMode: Text.WrapAtWordBoundaryOrAnywhere
-                }
-
-                Text {
-                  visible: itemDelegate.itemData.kind === "question"
-                  text: itemDelegate.answerInTopbar
-                    ? (itemDelegate.questions.length > 0
-                        ? "Select or type an answer for every question"
-                        : "This question has no structured input")
-                    : "Answer this question in " + root.agentName(itemDelegate.itemData)
-                  color: root.barForeground
-                  opacity: 0.65
-                  font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                  font.pixelSize: Style.font.body
-                }
-
-                Button {
-                  visible: itemDelegate.itemData.kind === "question"
-                    && itemDelegate.answerInTopbar
-                    && itemDelegate.questions.length > 0
-                  width: parent.width
-                  text: "Send answer"
-                  bordered: true
-                  foreground: itemDelegate.readyToSubmit() ? statusColors.attention : root.barForeground
-                  background: itemDelegate.readyToSubmit() ? Util.alpha(statusColors.attention, 0.14) : "transparent"
-                  fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
-                  fontSize: Style.font.body
-                  opacity: itemDelegate.readyToSubmit() ? 1 : 0.5
-                  Behavior on opacity { NumberAnimation { duration: 160 } }
-                  onClicked: itemDelegate.submitAnswers()
-                }
-
-                Text {
-                  visible: itemDelegate.itemData.kind === "attention" || itemDelegate.itemData.kind === "finished"
-                  text: itemDelegate.itemData.failure === "ratelimit"
-                    ? root.agentName(itemDelegate.itemData) + " stopped on a usage limit; retry in the terminal when it resets"
-                    : itemDelegate.itemData.failure
-                    ? root.agentName(itemDelegate.itemData) + " stopped on an error; retry in the terminal"
-                    : itemDelegate.itemData.kind === "finished"
-                    ? root.agentName(itemDelegate.itemData) + " finished this turn"
-                    : root.agentName(itemDelegate.itemData) + " is waiting for your reply in the terminal"
-                  color: root.barForeground
-                  opacity: 0.65
-                  font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                  font.pixelSize: Style.font.caption
-                }
-
-                Button {
-                  visible: itemDelegate.itemData.kind === "attention" || itemDelegate.itemData.kind === "finished"
-                  width: parent.width
-                  text: "Dismiss"
-                  bordered: true
-                  foreground: root.barForeground
-                  fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
-                  fontSize: Style.font.bodySmall
-                  onClicked: itemDelegate.respondPermission("cancel")
-                }
-
-                Row {
-                  id: permissionRow
-                  visible: itemDelegate.itemData.kind === "permission"
-                  width: parent.width
-                  spacing: Style.space(4)
-
-                  // "Always" only appears when the agent can remember the rule
-                  // (Claude with permission suggestions, OpenCode).
-                  readonly property var choices: itemDelegate.itemData.canAcceptAlways === true
-                    ? [
-                        { label: "✓ Allow", decision: "accept" },
-                        { label: "✓✓ Always", decision: "acceptAlways" },
-                        { label: "✕ Deny", decision: "decline" },
-                        { label: "Ask in CLI", decision: "cancel" }
-                      ]
-                    : [
-                        { label: "✓ Allow", decision: "accept" },
-                        { label: "✕ Deny", decision: "decline" },
-                        { label: "Ask in CLI", decision: "cancel" }
-                      ]
-
-                  function choiceTone(decision) {
-                    return decision === "accept" ? statusColors.success
-                      : decision === "acceptAlways" ? statusColors.attention
-                      : decision === "decline" ? statusColors.error
-                      : root.barForeground
                   }
-
-                  Repeater {
-                    model: permissionRow.choices
-
-                    delegate: Button {
-                      readonly property color tone: permissionRow.choiceTone(modelData.decision)
-                      readonly property bool plain: modelData.decision === "cancel"
-
-                      width: (permissionRow.width - permissionRow.spacing * (permissionRow.choices.length - 1))
-                        / permissionRow.choices.length
-                      text: modelData.label
-                      bordered: true
-                      foreground: tone
-                      background: plain ? "transparent" : Util.alpha(tone, modelData.decision === "accept" ? 0.18 : 0.1)
-                      opacity: plain ? 0.8 : 1
-                      fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
-                      fontSize: Style.font.bodySmall
-                      onClicked: itemDelegate.respondPermission(modelData.decision)
-                    }
-                  }
-                }
                 }
               }
             }
