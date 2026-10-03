@@ -21,6 +21,10 @@ async function withHome(run) {
 
 test("hook commands are recognized across install locations", () => {
   assert.ok(isAgentFoldCommand("node /usr/lib/node_modules/@thisisayande/agent-fold/dist/claude-hook.js", "claude-hook.js"));
+  assert.ok(isAgentFoldCommand("node /usr/lib/node_modules/@thisisayande/hommies/dist/claude-hook.js", "claude-hook.js"));
+  assert.ok(isAgentFoldCommand(
+    "test -f /usr/lib/node_modules/@thisisayande/hommies/dist/claude-hook.js && node /usr/lib/node_modules/@thisisayande/hommies/dist/claude-hook.js || true",
+    "claude-hook.js"));
   assert.ok(isAgentFoldCommand("node /src/agent-fold/packages/omarchy-bridge/dist/claude-hook.js", "claude-hook.js"));
   assert.ok(isAgentFoldCommand("agent-fold-claude-hook", "claude-hook.js"));
   assert.ok(!isAgentFoldCommand("node /other/tool/claude-hook.js", "claude-hook.js"));
@@ -76,7 +80,8 @@ test("setup writes each installed agent's config, backs up, and uninstall restor
 
     const written = await readJson(settings);
     assert.equal(written.theme, "dark");
-    assert.equal(written.hooks.Stop[0].hooks[0].command, "node /opt/agent-fold/dist/claude-hook.js");
+    assert.equal(written.hooks.Stop[0].hooks[0].command,
+      "test -f /opt/agent-fold/dist/claude-hook.js && node /opt/agent-fold/dist/claude-hook.js || true");
     assert.deepEqual((await readJson(join(home, ".config", "opencode", "opencode.json"))).plugin,
       ["file:///opt/agent-fold/dist/opencode-plugin.js"]);
 
@@ -113,6 +118,6 @@ test("a symlinked config is updated through the link", async () => {
 
     await runSetup({ ...install, providers: ["codex"] }, environment);
     const hooks = (await readJson(real)).hooks;
-    assert.deepEqual(hooks.PermissionRequest, [{ matcher: "*", hooks: [{ type: "command", command: "node /opt/agent-fold/dist/codex-hook.js", timeout: 305 }] }]);
+    assert.deepEqual(hooks.PermissionRequest, [{ matcher: "*", hooks: [{ type: "command", command: "test -f /opt/agent-fold/dist/codex-hook.js && node /opt/agent-fold/dist/codex-hook.js || true", timeout: 305 }] }]);
   });
 });

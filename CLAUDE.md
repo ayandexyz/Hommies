@@ -30,7 +30,7 @@ omarchy plugin validate packages/bell-plugin
 qmllint -I "$OMARCHY_PATH/shell" packages/bell-plugin/*.qml
 ```
 
-To try the plugin locally, symlink it into `~/.config/omarchy/plugins/io.github.ayan-de.agent-fold` and run `omarchy-shell shell rescanPlugins`.
+To try the plugin locally, symlink it into `~/.config/omarchy/plugins/io.github.ayandexyz.hommies` and run `omarchy-shell shell rescanPlugins`.
 
 ## Architecture
 

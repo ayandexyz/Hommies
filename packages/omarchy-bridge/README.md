@@ -1,4 +1,4 @@
-# @thisisayande/agent-fold
+# @thisisayande/hommies
 
 Localhost HTTP bridge that surfaces pending coding-agent questions and permissions
 to the agent-fold Omarchy plugin.
@@ -9,7 +9,7 @@ plugin all talk to it over loopback HTTP.
 ## API
 
 ```ts
-import { startBridgeServer } from "@thisisayande/agent-fold";
+import { startBridgeServer } from "@thisisayande/hommies";
 
 await startBridgeServer({
   dataDir: "/home/me/.local/share/agent-fold",
@@ -36,15 +36,20 @@ versioned path (`/v2/...`).
 
 ## Setup
 
-Install the package, then let `agent-fold setup` register the hooks for every
-agent it finds (Claude Code in `~/.claude`, Codex in `~/.codex`, OpenCode in
+Install the package, then let `hommies setup` (also available as `agent-fold
+setup`) register the hooks for the agents it finds (Claude Code in `~/.claude`, Codex in `~/.codex`, OpenCode in
 `~/.config/opencode`):
 
 ```sh
-npm install -g @thisisayande/agent-fold
-agent-fold setup --dry-run   # preview
-agent-fold setup
+npm install -g @thisisayande/hommies
+hommies setup --dry-run   # preview
+hommies setup
 ```
+
+In a terminal, setup first lists Claude Code, Codex, and OpenCode with whether
+each is installed, and lets you pick which to set up (arrows or `j`/`k` move,
+space toggles, enter confirms). `--yes` sets up every installed agent without
+asking, and `--only` names them; neither prompts, and nor does a non-terminal run.
 
 Setup merges into the existing configs: your other hooks and plugins are kept,
 re-running it replaces stale agent-fold paths instead of duplicating them, and
@@ -57,7 +62,7 @@ with `--only claude,codex,opencode`.
 To see whether each agent's hooks match what this version of setup writes:
 
 ```sh
-agent-fold setup --check
+hommies setup --check
 ```
 
 It reports each agent as up to date, out of date (missing events, an old
@@ -72,9 +77,15 @@ also count as out of date.
 To remove everything setup added:
 
 ```sh
-agent-fold uninstall
-npm uninstall -g @thisisayande/agent-fold
+hommies uninstall
+npm uninstall -g @thisisayande/hommies
 ```
+
+Run `hommies uninstall` first: npm no longer runs uninstall scripts, so removing
+the package cannot remove the hooks. Each hook command is
+`test -f <hook> && node <hook> || true`, so hooks left behind by a bare
+`npm uninstall` do nothing. OpenCode's `plugin` entry is the exception; remove
+it from `opencode.json` by hand.
 
 The sections below document the entries setup writes, for manual installs.
 
@@ -86,27 +97,27 @@ hook. It forwards the tool request to the local bridge and waits for an
 is not running, the hook produces no decision, so Claude Code keeps its normal
 terminal permission prompt.
 
-After installing `@thisisayande/agent-fold`, add this hook to `~/.claude/settings.json`
+After installing `@thisisayande/hommies`, add this hook to `~/.claude/settings.json`
 (replace the command with the absolute path to the installed package's
 `dist/claude-hook.js`):
 
 ```json
 {
   "hooks": {
-    "SessionStart": [{ "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/agent-fold/dist/claude-hook.js", "timeout": 5 }] }],
-    "PreToolUse": [{ "matcher": "*", "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/agent-fold/dist/claude-hook.js" }] }],
-    "PostToolUse": [{ "matcher": "AskUserQuestion", "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/agent-fold/dist/claude-hook.js" }] }],
-    "PostToolUseFailure": [{ "matcher": "*", "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/agent-fold/dist/claude-hook.js", "timeout": 5 }] }],
-    "Stop": [{ "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/agent-fold/dist/claude-hook.js", "timeout": 5 }] }],
-    "StopFailure": [{ "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/agent-fold/dist/claude-hook.js", "timeout": 5 }] }],
-    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/agent-fold/dist/claude-hook.js", "timeout": 5 }] }],
-    "SessionEnd": [{ "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/agent-fold/dist/claude-hook.js", "timeout": 5 }] }],
+    "SessionStart": [{ "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/hommies/dist/claude-hook.js", "timeout": 5 }] }],
+    "PreToolUse": [{ "matcher": "*", "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/hommies/dist/claude-hook.js" }] }],
+    "PostToolUse": [{ "matcher": "AskUserQuestion", "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/hommies/dist/claude-hook.js" }] }],
+    "PostToolUseFailure": [{ "matcher": "*", "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/hommies/dist/claude-hook.js", "timeout": 5 }] }],
+    "Stop": [{ "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/hommies/dist/claude-hook.js", "timeout": 5 }] }],
+    "StopFailure": [{ "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/hommies/dist/claude-hook.js", "timeout": 5 }] }],
+    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/hommies/dist/claude-hook.js", "timeout": 5 }] }],
+    "SessionEnd": [{ "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/hommies/dist/claude-hook.js", "timeout": 5 }] }],
     "PermissionRequest": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "node /absolute/path/to/@thisisayande/agent-fold/dist/claude-hook.js",
+            "command": "node /absolute/path/to/@thisisayande/hommies/dist/claude-hook.js",
             "timeout": 305
           }
         ]
@@ -367,14 +378,14 @@ groups:
 ```json
 {
   "hooks": {
-    "SessionStart": [{ "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/agent-fold/dist/codex-hook.js", "timeout": 5 }] }],
-    "PreToolUse": [{ "matcher": "*", "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/agent-fold/dist/codex-hook.js", "timeout": 5 }] }],
+    "SessionStart": [{ "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/hommies/dist/codex-hook.js", "timeout": 5 }] }],
+    "PreToolUse": [{ "matcher": "*", "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/hommies/dist/codex-hook.js", "timeout": 5 }] }],
     "PermissionRequest": [
-      { "matcher": "*", "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/agent-fold/dist/codex-hook.js", "timeout": 305 }] }
+      { "matcher": "*", "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/hommies/dist/codex-hook.js", "timeout": 305 }] }
     ],
-    "Stop": [{ "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/agent-fold/dist/codex-hook.js", "timeout": 5 }] }],
-    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/agent-fold/dist/codex-hook.js", "timeout": 5 }] }],
-    "SessionEnd": [{ "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/agent-fold/dist/codex-hook.js", "timeout": 5 }] }]
+    "Stop": [{ "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/hommies/dist/codex-hook.js", "timeout": 5 }] }],
+    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/hommies/dist/codex-hook.js", "timeout": 5 }] }],
+    "SessionEnd": [{ "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/hommies/dist/codex-hook.js", "timeout": 5 }] }]
   }
 }
 ```
@@ -417,7 +428,7 @@ plugins you already have:
 
 ```json
 {
-  "plugin": ["file:///absolute/path/to/@thisisayande/agent-fold/dist/opencode-plugin.js"]
+  "plugin": ["file:///absolute/path/to/@thisisayande/hommies/dist/opencode-plugin.js"]
 }
 ```
 

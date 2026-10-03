@@ -57,14 +57,25 @@ const isObject = (value: unknown): value is JsonObject =>
 const shellQuote = (value: string): string =>
   /^[A-Za-z0-9_\/.@+:=-]+$/.test(value) ? value : `'${value.replaceAll("'", `'\\''`)}'`;
 
-export const hookCommand = (hookPath: string): string => `node ${shellQuote(hookPath)}`;
+/**
+ * Runs the hook only while its file exists, and never reports failure. If the
+ * package is removed without `uninstall`, the leftover hooks do nothing instead
+ * of erroring on every agent event. The hooks never signal through exit codes.
+ */
+export const hookCommand = (hookPath: string): string => {
+  const path = shellQuote(hookPath);
+  return `test -f ${path} && node ${path} || true`;
+};
+
+/** Install paths that belong to us: the current package, its old name, and a source checkout. */
+const OUR_PATH = /hommies|agent-fold|omarchy-bridge/;
 
 /** True for a command that runs agent-fold's `hookFile` (any install location). */
 export function isAgentFoldCommand(command: unknown, hookFile: string): boolean {
   if (typeof command !== "string") return false;
   const bin = `agent-fold-${hookFile.replace(/\.js$/, "")}`;
   if (new RegExp(`(^|[\\s/'"])${bin}(['"\\s]|$)`).test(command)) return true;
-  return command.includes(`/${hookFile}`) && /agent-fold|omarchy-bridge/.test(command);
+  return command.includes(`/${hookFile}`) && OUR_PATH.test(command);
 }
 
 /**
@@ -136,7 +147,7 @@ export function openCodeFingerprint(config: JsonObject): string[] {
   const plugins = Array.isArray(config.plugin) ? config.plugin : [];
   return plugins
     .filter((entry: unknown): entry is string =>
-      typeof entry === "string" && entry.endsWith("/opencode-plugin.js") && /agent-fold|omarchy-bridge/.test(entry))
+      typeof entry === "string" && entry.endsWith("/opencode-plugin.js") && OUR_PATH.test(entry))
     .sort();
 }
 
@@ -151,7 +162,7 @@ export function mergeOpenCodeConfig(config: JsonObject, pluginUrl: string | null
   const next: JsonObject = { ...config };
   const plugins = Array.isArray(config.plugin) ? config.plugin : [];
   const kept = plugins.filter((entry: unknown) =>
-    !(typeof entry === "string" && entry.endsWith("/opencode-plugin.js") && /agent-fold|omarchy-bridge/.test(entry)));
+    !(typeof entry === "string" && entry.endsWith("/opencode-plugin.js") && OUR_PATH.test(entry)));
   if (pluginUrl === null && kept.length === plugins.length) return config;
   if (pluginUrl !== null) kept.push(pluginUrl);
   if (kept.length === 0) delete next.plugin;

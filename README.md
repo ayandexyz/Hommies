@@ -36,7 +36,7 @@ top-bar bell is still available.
 - **Desktop notifications** for new items, and optional **sounds** (off by default), each
   with a toggle in the panel.
 
-`agent-fold setup` registers the hooks for every agent it finds. See
+`hommies setup` lets you pick the agents to hook up from the ones it finds. See
 [`packages/omarchy-bridge/README.md`](packages/omarchy-bridge/README.md) for setup and the HTTP API.
 
 ## Packages
@@ -45,16 +45,16 @@ This is a pnpm workspace with two packages:
 
 | Path | What it is |
 | --- | --- |
-| `packages/omarchy-bridge/` | A TypeScript npm package: the loopback HTTP bridge (`/v1/pending`, `/v1/respond`, `/v1/focus`, the provider routes, ...), the agent hooks, the OpenCode plugin, and the `agent-fold` setup CLI. Published to npm as `@thisisayande/agent-fold`. |
+| `packages/omarchy-bridge/` | A TypeScript npm package: the loopback HTTP bridge (`/v1/pending`, `/v1/respond`, `/v1/focus`, the provider routes, ...), the agent hooks, the OpenCode plugin, and the `agent-fold` setup CLI. Published to npm as `@thisisayande/hommies`. |
 | `packages/bell-plugin/` | The Omarchy plugin itself: `manifest.json`, `Service.qml` (starts the bridge and hosts Hommie), `FloatingBuddy.qml` and `FloatingPanel.qml` (the floating character and its card), `characters/Hommie.qml`, the bar bell (`BarWidget.qml`, `Panel.qml`), and `bridge.js`, which talks to the bridge over HTTP. Distributed as a folder consumable by `omarchy plugin add`. |
 
 ## Status
 
 Working end to end, not yet published to the plugin marketplace.
 
-- **Bridge** (`@thisisayande/agent-fold`): the HTTP API, the Claude Code and Codex
+- **Bridge** (`@thisisayande/hommies`): the HTTP API, the Claude Code and Codex
   command hooks, the OpenCode plugin, the generic `agent-fold-hook`, desktop
-  notifications, sounds, and `agent-fold setup` are implemented and tested.
+  notifications, sounds, and `hommies setup` are implemented and tested.
 - **Plugin**: the service starts the bridge, restarts it when it exits, and polls
   `/v1/pending` every 3 seconds. Hommie's card (and the bar bell's panel) answers
   permissions and questions and shows live activity, failures, and the jump-to-terminal
@@ -92,24 +92,31 @@ agent-fold/
 1. Install the bridge and register the agent hooks:
 
    ```sh
-   npm install -g @thisisayande/agent-fold
-   agent-fold setup --dry-run   # preview the config changes
-   agent-fold setup
+   npm install -g @thisisayande/hommies
+   hommies setup --dry-run   # preview the config changes
+   hommies setup
    ```
 
-   Setup backs up every config it changes. For Codex, approve the new hooks in its
-   `/hooks` screen; restart OpenCode to load its plugin. `agent-fold setup --check`
-   tells you later whether the hooks are still current.
+   In a terminal, setup lists the agents it found and lets you pick which ones
+   to set up (`--yes` takes every installed agent; `--only` names them). It backs
+   up every config it changes. For Codex, approve the new hooks in its `/hooks`
+   screen; restart OpenCode to load its plugin. `hommies setup --check` tells you
+   later whether the hooks are still current.
 
 2. Add the plugin to the bar. Until it is on the marketplace, link it from a checkout:
 
    ```sh
-   ln -s "$PWD/packages/bell-plugin" ~/.config/omarchy/plugins/io.github.ayan-de.agent-fold
+   ln -s "$PWD/packages/bell-plugin" ~/.config/omarchy/plugins/io.github.ayandexyz.hommies
    omarchy-shell shell rescanPlugins
    ```
 
-   Once published, this becomes
-   `omarchy plugin add <this-repo>#path:packages/bell-plugin --enable`.
+   The published plugin lives in its own repository,
+   [ayandexyz/Hommies](https://github.com/ayandexyz/Hommies).
+
+To remove it, run `hommies uninstall` before `npm uninstall -g @thisisayande/hommies`
+(npm no longer runs uninstall scripts, so it cannot remove the hooks for you). Hooks
+left behind by a bare `npm uninstall` do nothing, except OpenCode's plugin entry,
+which you then remove from `opencode.json` by hand.
 
 The plugin starts the bridge (`agent-fold-bridge`) as a background service and
 restarts it if it exits. After updating the bridge package, run

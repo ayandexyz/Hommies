@@ -29,7 +29,7 @@ import "bridge.js" as Bridge
  */
 Panel {
   id: root
-  moduleName: "io.github.ayan-de.agent-fold"
+  moduleName: "io.github.ayandexyz.hommies"
   manageIpc: false
 
   component ProviderTab: Button {
@@ -260,7 +260,7 @@ Panel {
     return providerName(item ? item.provider : "")
   }
 
-  /** e.g. "Claude, Codex" when `agent-fold setup --check` would report them out of date. */
+  /** e.g. "Claude, Codex" when `hommies setup --check` would report them out of date. */
   readonly property string outdatedHooks: {
     var providers = hostWidget && hostWidget.snapshot && hostWidget.snapshot.hooksOutdated ? hostWidget.snapshot.hooksOutdated : []
     var names = []
@@ -546,7 +546,7 @@ Panel {
             anchors.verticalCenter: parent.verticalCenter
             anchors.leftMargin: Style.space(14)
             anchors.rightMargin: Style.space(10)
-            text: root.outdatedHooks + " hooks are out of date. Run `agent-fold setup` to get every feature."
+            text: root.outdatedHooks + " hooks are out of date. Run `hommies setup` to get every feature."
             textFormat: Text.PlainText
             color: statusColors.warning
             font.family: root.bar ? root.bar.fontFamily : Style.font.family

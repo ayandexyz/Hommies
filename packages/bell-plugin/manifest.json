@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
-  "id": "io.github.ayan-de.agent-fold",
+  "id": "io.github.ayandexyz.hommies",
   "name": "agent-fold",
-  "version": "0.0.0",
-  "author": "agent-fold contributors",
+  "version": "0.1.0",
+  "author": "Ayan De",
   "license": "MIT",
   "description": "Bell in the Omarchy bar that surfaces pending coding-agent questions and permissions.",
   "kinds": [

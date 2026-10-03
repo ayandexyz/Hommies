@@ -1,6 +1,6 @@
 # agent-fold bell plugin
 
-The Omarchy plugin half of `agent-fold`. The other half — `@thisisayande/agent-fold` —
+The Omarchy plugin half of `agent-fold`. The other half — `@thisisayande/hommies` —
 runs the daemon this plugin talks to.
 
 ## Files
@@ -58,12 +58,11 @@ qmllint -I "$OMARCHY_PATH/shell" packages/bell-plugin/BarWidget.qml packages/bel
 To try the plugin locally, copy the folder into `~/.config/omarchy/plugins/`:
 
 ```sh
-ln -s "$(pwd)/packages/bell-plugin" "$HOME/.config/omarchy/plugins/io.github.ayan-de.agent-fold"
+ln -s "$(pwd)/packages/bell-plugin" "$HOME/.config/omarchy/plugins/io.github.ayandexyz.hommies"
 omarchy-shell shell rescanPlugins
 ```
 
 ## Manifest id
 
-`io.github.ayan-de.agent-fold` is a placeholder namespace. Replace it with one you
-own before the first install (Omarchy rejects third-party IDs that start with
-`omarchy.`).
+The plugin ID is `io.github.ayandexyz.hommies`. It is permanent: the marketplace
+listing, the plugin's install directory, and its saved settings are all keyed on it.

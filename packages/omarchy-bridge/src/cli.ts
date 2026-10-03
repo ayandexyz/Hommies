@@ -1,13 +1,15 @@
 #!/usr/bin/env node
-/** `agent-fold` CLI: registers or removes the agent hooks that report to the bridge. */
+/** `hommies` (also `agent-fold`) CLI: registers or removes the agent hooks that report to the bridge. */
+import { multiselect, type Choice } from "./multiselect.js";
 import {
   checkHooks, defaultSetupEnvironment, runSetup, SETUP_PROVIDERS, type HookCheck, type SetupProvider, type SetupResult,
 } from "./setup.js";
 
-const USAGE = `Usage: agent-fold <command> [options]
+const USAGE = `Usage: hommies <command> [options]
 
 Commands:
-  setup       Register agent-fold hooks for Claude Code, Codex, and OpenCode
+  setup       Register hooks for Claude Code, Codex, and OpenCode. In a
+              terminal it lists the agents it found and lets you pick.
   uninstall   Remove the hooks that setup added
 
 Options:
@@ -15,6 +17,7 @@ Options:
   --check            Report whether each agent's hooks are current; exits 1
                      when any are out of date (setup only)
   --only <list>      Comma-separated providers: ${SETUP_PROVIDERS.join(",")}
+  -y, --yes          Set up every installed agent without asking
   -h, --help         Show this help
 
 Each changed config is backed up next to itself as <file>.agent-fold-backup-<time>.`;
@@ -22,7 +25,7 @@ Each changed config is backed up next to itself as <file>.agent-fold-backup-<tim
 const isProvider = (value: string): value is SetupProvider => (SETUP_PROVIDERS as ReadonlyArray<string>).includes(value);
 
 function fail(message: string): never {
-  process.stderr.write(`agent-fold: ${message}\n\n${USAGE}\n`);
+  process.stderr.write(`hommies: ${message}\n\n${USAGE}\n`);
   process.exit(2);
 }
 
@@ -41,12 +44,37 @@ function report(results: ReadonlyArray<SetupResult>, uninstall: boolean): void {
 
 const checkLines: Record<HookCheck["status"], string> = {
   current: "✓ hooks are up to date",
-  outdated: "! hooks are out of date; run `agent-fold setup`",
-  missing: "- no agent-fold hooks; run `agent-fold setup` to add them",
+  outdated: "! hooks are out of date; run `hommies setup`",
+  missing: "- no agent-fold hooks; run `hommies setup` to add them",
   "not-installed": "- not installed",
   unsupported: "- JSONC config; check it by hand (see README)",
   error: "✗ config could not be read",
 };
+
+const providerLabels: Record<SetupProvider, string> = { claude: "Claude Code", codex: "Codex", opencode: "OpenCode" };
+
+const pickHints: Record<HookCheck["status"], string> = {
+  current: "hooks up to date",
+  outdated: "hooks out of date",
+  missing: "found",
+  "not-installed": "not installed",
+  unsupported: "JSONC config; edit it by hand (see README)",
+  error: "config could not be read",
+};
+
+/** Asks which installed agents to set up. Returns `null` when the user cancels. */
+async function pickProviders(): Promise<SetupProvider[] | null> {
+  const checks = await checkHooks(defaultSetupEnvironment());
+  const choices: Choice<SetupProvider>[] = checks.map((check) => {
+    const usable = check.status !== "not-installed" && check.status !== "unsupported";
+    return { value: check.provider, label: providerLabels[check.provider], hint: pickHints[check.status], checked: usable, disabled: !usable };
+  });
+  if (!choices.some((choice) => choice.disabled !== true)) {
+    process.stdout.write("No supported agents found (Claude Code, Codex, OpenCode).\n");
+    return [];
+  }
+  return multiselect("Which agents should report to the Omarchy bar?", choices);
+}
 
 function reportChecks(checks: ReadonlyArray<HookCheck>): void {
   for (const check of checks) {
@@ -66,16 +94,20 @@ async function main(): Promise<void> {
 
   let dryRun = false;
   let check = false;
+  let yes = false;
+  let only = false;
   let providers: ReadonlyArray<SetupProvider> = SETUP_PROVIDERS;
   for (let i = 0; i < rest.length; i++) {
     const arg = rest[i];
     if (arg === "--dry-run") dryRun = true;
     else if (arg === "--check" && command === "setup") check = true;
+    else if (arg === "-y" || arg === "--yes") yes = true;
     else if (arg === "--only") {
       const list = (rest[++i] ?? "").split(",").map((value) => value.trim()).filter((value) => value !== "");
       const unknown = list.filter((value) => !isProvider(value));
       if (list.length === 0 || unknown.length > 0) fail(`--only expects ${SETUP_PROVIDERS.join(", ")}`);
       providers = list.filter(isProvider);
+      only = true;
     } else fail(`unknown option '${arg ?? ""}'`);
   }
 
@@ -87,6 +119,15 @@ async function main(): Promise<void> {
   }
 
   const uninstall = command === "uninstall";
+  if (!uninstall && !only && !yes && process.stdin.isTTY && process.stdout.isTTY) {
+    const picked = await pickProviders();
+    if (picked === null) {
+      process.stdout.write("Cancelled; nothing changed.\n");
+      return;
+    }
+    if (picked.length === 0) return;
+    providers = picked;
+  }
   const results = await runSetup({ uninstall, dryRun, providers }, defaultSetupEnvironment());
   report(results, uninstall);
   if (results.some((result) => result.status === "error")) process.exitCode = 1;

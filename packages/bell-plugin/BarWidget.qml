@@ -20,7 +20,7 @@ import "bridge.js" as Bridge
  */
 BarWidget {
   id: root
-  moduleName: "io.github.ayan-de.agent-fold"
+  moduleName: "io.github.ayandexyz.hommies"
 
   readonly property bool opened: panelLoader.item ? panelLoader.item.opened === true : false
   readonly property bool popoutSwitchClosing: panelLoader.item ? panelLoader.item.popoutSwitchClosing === true : false

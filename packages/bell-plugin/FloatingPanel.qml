@@ -21,7 +21,7 @@ import "bridge.js" as Bridge
  */
 Panel {
   id: root
-  moduleName: "io.github.ayan-de.agent-fold"
+  moduleName: "io.github.ayandexyz.hommies"
   manageIpc: false
 
   // Square, logo-only tab for the vertical rail. The agent name is the

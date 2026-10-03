@@ -1,6 +1,6 @@
 {
-  "name": "@thisisayande/agent-fold",
-  "version": "0.0.0",
+  "name": "@thisisayande/hommies",
+  "version": "0.1.0",
   "description": "Localhost HTTP bridge that exposes pending coding-agent questions and permissions to the agent-fold Omarchy plugin.",
   "license": "MIT",
   "author": "Ayan De",
@@ -25,6 +25,7 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
+    "hommies": "./dist/cli.js",
     "agent-fold": "./dist/cli.js",
     "agent-fold-bridge": "./dist/runtime.js",
     "agent-fold-claude-hook": "./dist/claude-hook.js",

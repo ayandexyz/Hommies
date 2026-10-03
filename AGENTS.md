@@ -4,7 +4,7 @@
 
 pnpm workspace monorepo with two packages.
 
-- `packages/omarchy-bridge/` — `@thisisayande/agent-fold` (npm). TypeScript + Effect.
+- `packages/omarchy-bridge/` — `@thisisayande/hommies` (npm). TypeScript + Effect.
   A localhost HTTP daemon (`startBridgeServer` in `src/server.ts`) plus four
   provider adapters that feed it:
   - Claude Code: blocking command hooks (`src/claude-hook.ts`, bin `agent-fold-claude-hook`).
@@ -45,9 +45,9 @@ bridge emits via its own `packages/omarchy-bridge/tsconfig.json`.
 Single-package verification:
 
 ```sh
-pnpm --filter @thisisayande/agent-fold build
-pnpm --filter @thisisayande/agent-fold typecheck
-pnpm --filter @thisisayande/agent-fold test
+pnpm --filter @thisisayande/hommies build
+pnpm --filter @thisisayande/hommies typecheck
+pnpm --filter @thisisayande/hommies test
 ```
 
 Validate QML against the installed Omarchy shell:
@@ -111,7 +111,7 @@ hang on a request nobody owns — see `onHookDisconnect` in `server.ts`.
   `tsconfig.base.json`). No `any` in `packages/omarchy-bridge`.
 - QML follows the built-in `omarchy.clock` plugin: `BarWidget.qml` is the
   entry point, `Panel.qml` is loaded by it via a `Loader`. `moduleName`
-  MUST match the manifest id (`io.github.ayan-de.agent-fold`) across
+  MUST match the manifest id (`io.github.ayandexyz.hommies`) across
   `BarWidget.qml`, `Panel.qml`, and `Service.qml`.
 - `bridge.js` is a `.pragma library` plain JS module (no build step).
   Functions return Promises; BarWidget always logs failures via
@@ -147,7 +147,7 @@ exercise the HTTP surface end-to-end:
   <this-repo>#path:packages/bell-plugin --enable` install described in the
   README is the target, not a working command yet.
 - `Service.qml` calls `agent-fold-bridge` directly from `$PATH`; the
-  bridge must be installed via `npm i -g @thisisayande/agent-fold` for the
+  bridge must be installed via `npm i -g @thisisayande/hommies` for the
   plugin to find it (or via Omarchy's plugin runtime that resolves the
   npm-installed copy).
 - `docs/plan.md` does not exist; the extraction plan lives in this file.
