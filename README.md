@@ -111,7 +111,9 @@ agent-fold/
    ```
 
    The published plugin lives in its own repository,
-   [ayandexyz/Hommies](https://github.com/ayandexyz/Hommies).
+   [ayandexyz/hommies-plugin](https://github.com/ayandexyz/hommies-plugin):
+   `omarchy plugin add https://github.com/ayandexyz/hommies-plugin`. Copy changes
+   from `packages/bell-plugin/` there when you release.
 
 To remove it, run `hommies uninstall` before `npm uninstall -g @thisisayande/hommies`
 (npm no longer runs uninstall scripts, so it cannot remove the hooks for you). Hooks
