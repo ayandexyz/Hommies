@@ -12,7 +12,7 @@ runs the daemon this plugin talks to.
 | `Panel.qml` | Lists pending items by provider and renders Claude's, OpenCode's, and Omacode's structured question controls. |
 | `Service.qml` | Singleton that owns the bridge daemon process and hosts the floating character (polling, preferences, mood). |
 | `FloatingBuddy.qml` | The floating character window. Click it to open the agent tabs in a card beside it, right-click for its settings menu, drag it to move it. |
-| `FloatingPanel.qml` | The floating card: provider tabs, sessions, and items only. A separate copy of `Panel.qml` so the two UIs can diverge. |
+| `FloatingPanel.qml` | The floating card: provider tabs, sessions, and items only (no settings, no outdated-hooks notice). A separate copy of `Panel.qml` so the two UIs can diverge. |
 | `characters/*.qml` | Swappable characters. `Mochi.qml` is a temporary, local-only stand-in (see the note at the top of the file). |
 | `bridge.js` | JS module loaded by the QML files. Talks to the bridge over `127.0.0.1`. |
 
