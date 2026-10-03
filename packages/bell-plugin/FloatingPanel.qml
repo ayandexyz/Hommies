@@ -9,9 +9,9 @@ import "bridge.js" as Bridge
  *
  * The card that FloatingBuddy.qml opens next to the floating character. It
  * started as a copy of Panel.qml (the bar popout) and is kept separate on
- * purpose so the two can diverge: this one shows only the outdated-hooks
- * notice and the provider tabs with their sessions and items. Settings live
- * in the character's right-click menu instead (see FloatingBuddy.qml).
+ * purpose so the two can diverge: this one shows only the provider tabs
+ * with their sessions and items. Settings live in the character's
+ * right-click menu instead (see FloatingBuddy.qml).
  *
  * Rendering rules for items are the same as Panel.qml: Claude, OpenCode, and
  * Omacode questions keep their headers, options, descriptions, and
@@ -179,7 +179,7 @@ Panel {
   }
 
   // A tinted surface with a status stripe on the left. Holds one pending
-  // item, or a notice such as the outdated-hooks reminder.
+  // item.
   component StatusCard: Rectangle {
     id: statusCard
 
@@ -249,14 +249,6 @@ Panel {
 
   function agentName(item) {
     return providerName(item ? item.provider : "")
-  }
-
-  /** e.g. "Claude, Codex" when `agent-fold setup --check` would report them out of date. */
-  readonly property string outdatedHooks: {
-    var providers = hostWidget && hostWidget.snapshot && hostWidget.snapshot.hooksOutdated ? hostWidget.snapshot.hooksOutdated : []
-    var names = []
-    for (var index = 0; index < providers.length; index++) names.push(providerName(providers[index]))
-    return names.join(", ")
   }
 
   readonly property bool showOtherTab: providerCount("other") > 0 || sessionActivity("other").length > 0
@@ -479,28 +471,6 @@ Panel {
         id: content
         width: parent.width
         spacing: Style.space(8)
-
-        StatusCard {
-          visible: root.outdatedHooks !== ""
-          width: parent.width
-          implicitHeight: outdatedText.implicitHeight + Style.space(8) * 2
-          tone: statusColors.warning
-
-          Text {
-            id: outdatedText
-            anchors.left: parent.left
-            anchors.right: parent.right
-            anchors.verticalCenter: parent.verticalCenter
-            anchors.leftMargin: Style.space(14)
-            anchors.rightMargin: Style.space(10)
-            text: root.outdatedHooks + " hooks are out of date. Run `agent-fold setup` to get every feature."
-            textFormat: Text.PlainText
-            color: statusColors.warning
-            font.family: root.bar ? root.bar.fontFamily : Style.font.family
-            font.pixelSize: Style.font.caption
-            wrapMode: Text.WrapAtWordBoundaryOrAnywhere
-          }
-        }
 
         Row {
           id: providerTabs
