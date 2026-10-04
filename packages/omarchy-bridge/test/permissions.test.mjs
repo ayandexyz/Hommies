@@ -84,11 +84,11 @@ test("top-bar question disappears when the hook disconnects", async () => {
 });
 
 async function withServer(run) {
-  const dataDir = await mkdtemp(join(tmpdir(), "agent-fold-permission-test-"));
+  const dataDir = await mkdtemp(join(tmpdir(), "hommies-permission-test-"));
   const server = await startBridgeServer({ dataDir, port: 0 });
   try {
     const connection = JSON.parse(await readFile(join(dataDir, "port.json"), "utf8"));
-    const headers = { "content-type": "application/json", "x-agent-fold-token": connection.token };
+    const headers = { "content-type": "application/json", "x-hommies-token": connection.token };
     const request = (method, path, body, signal) => fetch(`http://127.0.0.1:${server.port}${path}`, {
       method,
       headers,

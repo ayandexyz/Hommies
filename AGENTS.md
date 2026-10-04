@@ -1,4 +1,4 @@
-# agent-fold — agent instructions
+# Hommies — agent instructions
 
 ## Project shape
 
@@ -7,8 +7,8 @@ pnpm workspace monorepo with two packages.
 - `packages/omarchy-bridge/` — `@thisisayande/hommies` (npm). TypeScript + Effect.
   A localhost HTTP daemon (`startBridgeServer` in `src/server.ts`) plus four
   provider adapters that feed it:
-  - Claude Code: blocking command hooks (`src/claude-hook.ts`, bin `agent-fold-claude-hook`).
-  - Codex: blocking command hooks (`src/codex-hook.ts`, bin `agent-fold-codex-hook`).
+  - Claude Code: blocking command hooks (`src/claude-hook.ts`, bin `hommies-claude-hook`).
+  - Codex: blocking command hooks (`src/codex-hook.ts`, bin `hommies-codex-hook`).
   - OpenCode: in-process plugin (`src/opencode-plugin.ts`, export `AgentFoldOpenCode`).
   - Omacode: built-in to the agent itself; Omacode talks to the same endpoints as OpenCode.
   Shared branded ID types and provider kinds live in `src/localContracts.ts`.
@@ -26,7 +26,7 @@ pnpm workspace monorepo with two packages.
 - **No telemetry, no analytics, no auto-update pings.** The bridge is
   local-only; `server.ts` rejects any host that is not `127.0.0.1` or `::1`
   and exits when the shell exits. All HTTP routes (except `OPTIONS` and
-  `GET /healthz`) require the `x-agent-fold-token` header whose value is
+  `GET /healthz`) require the `x-hommies-token` header whose value is
   written to `port.json` by `startBridgeServer`.
 
 ## Local development
@@ -61,7 +61,7 @@ own; `pnpm -r build` is a no-op for it.
 
 ## Runtime wiring (read this before touching `Service.qml` or `BarWidget.qml`)
 
-1. `Service.qml` starts `agent-fold-bridge --data-dir <XDG_DATA_HOME>/agent-fold --port 0`
+1. `Service.qml` starts `hommies-bridge --data-dir <XDG_DATA_HOME>/hommies --port 0`
    on shell startup; on exit a 3 s timer restarts it. The daemon picks a free
    port, generates a 32-byte token, and writes `{ port, token, version: 1 }`
    to `<dataDir>/port.json` with mode `0o600`.
@@ -71,8 +71,8 @@ own; `pnpm -r build` is a no-op for it.
    `import`/`export`) and is loaded with `import "bridge.js" as Bridge`.
 3. Hook adapters discover the daemon by reading `port.json` directly
    (`src/hook-common.ts#readConnection`). They honour
-   `AGENT_FOLD_DATA_DIR` to override the default
-   `$XDG_DATA_HOME/agent-fold` (falling back to `~/.local/share/agent-fold`).
+   `HOMMIES_DATA_DIR` to override the default
+   `$XDG_DATA_HOME/hommies` (falling back to `~/.local/share/hommies`).
 4. `POST /v1/preferences` syncs the two user settings
    (`questionAnswerSurface: topbar|cli`, `desktopNotifications: bool`) from the
    QML panel into the bridge; settings are declared in `manifest.json` and
@@ -115,7 +115,7 @@ hang on a request nobody owns — see `onHookDisconnect` in `server.ts`.
   `BarWidget.qml`, `Panel.qml`, and `Service.qml`.
 - `bridge.js` is a `.pragma library` plain JS module (no build step).
   Functions return Promises; BarWidget always logs failures via
-  `console.warn("agent-fold ...")` and never throws into Quickshell.
+  `console.warn("hommies ...")` and never throws into Quickshell.
 - Provider-specific provider ids and labels live in `providerLabels` and
   `hasRequestIds` (`src/server.ts`); add a new provider there, in
   `localContracts.ts`'s `ProviderDriverKind`, and in the manifest schema
@@ -146,7 +146,7 @@ exercise the HTTP surface end-to-end:
   this repo (no `package.json`, no install path). The `omarchy plugin add
   <this-repo>#path:packages/bell-plugin --enable` install described in the
   README is the target, not a working command yet.
-- `Service.qml` calls `agent-fold-bridge` directly from `$PATH`; the
+- `Service.qml` calls `hommies-bridge` directly from `$PATH`; the
   bridge must be installed via `npm i -g @thisisayande/hommies` for the
   plugin to find it (or via Omarchy's plugin runtime that resolves the
   npm-installed copy).

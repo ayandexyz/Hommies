@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 /**
- * `agent-fold-hook --agent <name>`: a command hook for any agent whose hooks
+ * `hommies-hook --agent <name>` (`agent-fold-hook` before the rename): a command hook for any agent whose hooks
  * send Claude-style JSON on stdin. Reports activity, turn ends, and failures
  * to `/v1/agents/<name>/...`. It never blocks and never writes to stdout, so
  * permission requests stay in the agent's own prompt.
  *
- * The name comes from `--agent`, else `$AGENT_FOLD_AGENT`, else an `agent`
+ * The name comes from `--agent`, else `$HOMMIES_AGENT` (or the older
+ * `$AGENT_FOLD_AGENT`), else an `agent`
  * field in the payload. Invalid or reserved names are dropped silently.
  */
 import { isValidAgentName } from "./agent-name.js";
@@ -29,8 +30,8 @@ async function main(): Promise<void> {
   const input = await readStdin();
   let event: AgentHookEvent;
   try { event = JSON.parse(input) as AgentHookEvent; } catch { return; }
-  // `||`: an empty $AGENT_FOLD_AGENT falls through to the payload field.
-  const name = argumentName(process.argv.slice(2)) || process.env.AGENT_FOLD_AGENT || event.agent;
+  // `||`: an empty variable falls through to the payload field.
+  const name = argumentName(process.argv.slice(2)) || process.env.HOMMIES_AGENT || process.env.AGENT_FOLD_AGENT || event.agent;
   if (typeof name !== "string" || !isValidAgentName(name) || typeof event.session_id !== "string") return;
   const connection = await readConnection();
   if (connection === null) return;

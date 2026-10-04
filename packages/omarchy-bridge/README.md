@@ -1,7 +1,7 @@
 # @thisisayande/hommies
 
 Localhost HTTP bridge that surfaces pending coding-agent questions and permissions
-to the agent-fold Omarchy plugin.
+to the Hommies Omarchy plugin.
 
 It is a self-contained server: the agent hooks, the OpenCode plugin, and the Omarchy
 plugin all talk to it over loopback HTTP.
@@ -12,7 +12,7 @@ plugin all talk to it over loopback HTTP.
 import { startBridgeServer } from "@thisisayande/hommies";
 
 await startBridgeServer({
-  dataDir: "/home/me/.local/share/agent-fold",
+  dataDir: "/home/me/.local/share/hommies",
   port: 0, // 0 = pick a free port; written to dataDir/port.json
 });
 ```
@@ -36,8 +36,8 @@ versioned path (`/v2/...`).
 
 ## Setup
 
-Install the package, then let `hommies setup` (also available as `agent-fold
-setup`) register the hooks for the agents it finds (Claude Code in `~/.claude`, Codex in `~/.codex`, OpenCode in
+Install the package, then let `hommies setup` (the alias from before the rename,
+`agent-fold setup`, also works) register the hooks for the agents it finds (Claude Code in `~/.claude`, Codex in `~/.codex`, OpenCode in
 `~/.config/opencode`):
 
 ```sh
@@ -52,8 +52,8 @@ space toggles, enter confirms). `--yes` sets up every installed agent without
 asking, and `--only` names them; neither prompts, and nor does a non-terminal run.
 
 Setup merges into the existing configs: your other hooks and plugins are kept,
-re-running it replaces stale agent-fold paths instead of duplicating them, and
-every file it changes is first backed up as `<file>.agent-fold-backup-<time>`.
+re-running it replaces stale Hommies paths instead of duplicating them, and
+every file it changes is first backed up as `<file>.hommies-backup-<time>`.
 It respects `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, and `XDG_CONFIG_HOME`, writes
 through symlinked dotfiles, and leaves unparseable files and OpenCode's
 `opencode.jsonc` untouched (register those by hand as described below). Limit it
@@ -66,8 +66,8 @@ hommies setup --check
 ```
 
 It reports each agent as up to date, out of date (missing events, an old
-install path, or edited matchers or timeouts), without agent-fold hooks, or not
-installed, and exits `1` when any are out of date. Only agent-fold's own
+install path, or edited matchers or timeouts), without Hommies hooks, or not
+installed, and exits `1` when any are out of date. Only Hommies' own
 entries are compared, so your other hooks and their order do not matter. The
 bridge runs the same check at start and every minute and lists out-of-date
 agents in `hooksOutdated` on `/v1/pending`; the panel then shows a reminder to
@@ -87,13 +87,29 @@ the package cannot remove the hooks. Each hook command is
 `npm uninstall` do nothing. OpenCode's `plugin` entry is the exception; remove
 it from `opencode.json` by hand.
 
+### Renamed from agent-fold
+
+Hommies was called agent-fold. The old names keep working, so existing hooks,
+Omacode's built-in integration, and older plugin copies need no changes:
+
+| Now | Before the rename (still accepted) |
+| --- | --- |
+| `hommies`, `hommies-bridge`, `hommies-hook`, `hommies-claude-hook`, `hommies-codex-hook` | the same commands named `agent-fold*` |
+| `$XDG_DATA_HOME/hommies/` | `$XDG_DATA_HOME/agent-fold/`: the bridge also writes `port.json` there, and hooks look there when the new folder has none |
+| `x-hommies-token` header | `x-agent-fold-token` |
+| `HOMMIES_DATA_DIR`, `HOMMIES_AGENT` | `AGENT_FOLD_DATA_DIR`, `AGENT_FOLD_AGENT` |
+| `<file>.hommies-backup-<time>` | `<file>.agent-fold-backup-<time>` (older backups keep their names) |
+
+The plugin carries over Hommie's saved position and preferences from
+`agent-fold/floating.json` the first time it starts without a `hommies` folder.
+
 The sections below document the entries setup writes, for manual installs.
 
 ## Claude Code integration
 
 The first provider integration uses Claude Code's `PermissionRequest` command
 hook. It forwards the tool request to the local bridge and waits for an
-**Accept**, **Always allow**, **Decline**, or **Cancel** response from agent-fold. If the bridge
+**Accept**, **Always allow**, **Decline**, or **Cancel** response from Hommies. If the bridge
 is not running, the hook produces no decision, so Claude Code keeps its normal
 terminal permission prompt.
 
@@ -128,7 +144,7 @@ After installing `@thisisayande/hommies`, add this hook to `~/.claude/settings.j
 ```
 
 The bridge writes its loopback port and a per-start bearer token to
-`$XDG_DATA_HOME/agent-fold/port.json` (or `~/.local/share/agent-fold/port.json`).
+`$XDG_DATA_HOME/hommies/port.json` (or `~/.local/share/hommies/port.json`).
 The hook reads that file; no network request leaves the machine. Claude's hook
 payload and pending permissions stay in memory and are discarded when the
 bridge exits.
@@ -257,22 +273,22 @@ Older plugin copies ignore `failure` and show these as plain attention items.
 ## Custom agents
 
 Any agent that can run a command hook can show up in the bar without its own
-adapter. Point its hooks at `agent-fold-hook --agent <name>`; it reads
+adapter. Point its hooks at `hommies-hook --agent <name>`; it reads
 Claude-style hook JSON on stdin and reports to `/v1/agents/<name>/...`:
 
 ```json
 {
   "hooks": {
-    "SessionStart": [{ "hooks": [{ "type": "command", "command": "agent-fold-hook --agent my-tool", "timeout": 5 }] }],
-    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "agent-fold-hook --agent my-tool", "timeout": 5 }] }],
-    "PreToolUse": [{ "matcher": "*", "hooks": [{ "type": "command", "command": "agent-fold-hook --agent my-tool", "timeout": 5 }] }],
-    "Stop": [{ "hooks": [{ "type": "command", "command": "agent-fold-hook --agent my-tool", "timeout": 5 }] }],
-    "SessionEnd": [{ "hooks": [{ "type": "command", "command": "agent-fold-hook --agent my-tool", "timeout": 5 }] }]
+    "SessionStart": [{ "hooks": [{ "type": "command", "command": "hommies-hook --agent my-tool", "timeout": 5 }] }],
+    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "hommies-hook --agent my-tool", "timeout": 5 }] }],
+    "PreToolUse": [{ "matcher": "*", "hooks": [{ "type": "command", "command": "hommies-hook --agent my-tool", "timeout": 5 }] }],
+    "Stop": [{ "hooks": [{ "type": "command", "command": "hommies-hook --agent my-tool", "timeout": 5 }] }],
+    "SessionEnd": [{ "hooks": [{ "type": "command", "command": "hommies-hook --agent my-tool", "timeout": 5 }] }]
   }
 }
 ```
 
-- The name comes from `--agent`, then `$AGENT_FOLD_AGENT`, then an `agent`
+- The name comes from `--agent`, then `$HOMMIES_AGENT`, then an `agent`
   field in the payload. It must be 1-24 lowercase letters, digits, or hyphens,
   and not `claude`, `codex`, `opencode`, `omacode`, `cursor`, `grok`, or
   `antigravity`, so a custom agent cannot pose as a built-in one. Invalid
@@ -290,7 +306,7 @@ Quick test with the bridge running:
 
 ```sh
 echo '{"hook_event_name":"UserPromptSubmit","session_id":"t1","cwd":"'"$PWD"'","prompt":"hello"}' \
-  | agent-fold-hook --agent demo
+  | hommies-hook --agent demo
 ```
 
 ## Always allow
@@ -337,7 +353,7 @@ commands run through `execFile` without a shell.
 
 ## Desktop notifications
 
-`agent-fold-bridge` sends a desktop notification (via `notify-send`) for every
+`hommies-bridge` sends a desktop notification (via `notify-send`) for every
 new item: permission requests (critical urgency), questions and waiting replies
 (normal), and finished turns (low). The title names the session by the agent's
 session title or project folder, and a session's newer notification replaces its older
@@ -396,7 +412,7 @@ keeps its native approval prompt; turn hooks never write to stdout.
 
 ## OpenCode integration
 
-OpenCode has no command hooks, so agent-fold ships an OpenCode server plugin,
+OpenCode has no command hooks, so Hommies ships an OpenCode server plugin,
 `dist/opencode-plugin.js`. It runs inside OpenCode and gives OpenCode the same
 features as Claude Code:
 

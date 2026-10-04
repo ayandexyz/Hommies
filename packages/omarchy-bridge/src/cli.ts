@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/** `hommies` (also `agent-fold`) CLI: registers or removes the agent hooks that report to the bridge. */
+/** `hommies` CLI (`agent-fold` is the alias from before the rename): registers or removes the agent hooks that report to the bridge. */
 import { multiselect, type Choice } from "./multiselect.js";
 import {
   checkHooks, defaultSetupEnvironment, runSetup, SETUP_PROVIDERS, type HookCheck, type SetupProvider, type SetupResult,
@@ -20,7 +20,7 @@ Options:
   -y, --yes          Set up every installed agent without asking
   -h, --help         Show this help
 
-Each changed config is backed up next to itself as <file>.agent-fold-backup-<time>.`;
+Each changed config is backed up next to itself as <file>.hommies-backup-<time>.`;
 
 const isProvider = (value: string): value is SetupProvider => (SETUP_PROVIDERS as ReadonlyArray<string>).includes(value);
 
@@ -45,7 +45,7 @@ function report(results: ReadonlyArray<SetupResult>, uninstall: boolean): void {
 const checkLines: Record<HookCheck["status"], string> = {
   current: "✓ hooks are up to date",
   outdated: "! hooks are out of date; run `hommies setup`",
-  missing: "- no agent-fold hooks; run `hommies setup` to add them",
+  missing: "- no Hommies hooks; run `hommies setup` to add them",
   "not-installed": "- not installed",
   unsupported: "- JSONC config; check it by hand (see README)",
   error: "✗ config could not be read",

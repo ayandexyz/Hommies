@@ -11,7 +11,7 @@
  */
 
 import { mkdir } from "node:fs/promises";
-import { resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 
 import { createDesktopNotifier } from "./notifier.js";
 import { startBridgeServer } from "./server.js";
@@ -47,18 +47,23 @@ function parseArgs(argv: ReadonlyArray<string>): RuntimeOptions {
   };
 }
 
+/** Readers from before the rename look in `agent-fold`, next to the `hommies` folder. */
+const legacyDataDirs = (dataDir: string): string[] =>
+  basename(dataDir) === "hommies" ? [join(dirname(dataDir), "agent-fold")] : [];
+
 async function main(): Promise<void> {
   const options = parseArgs(process.argv.slice(2));
   await mkdir(options.dataDir, { recursive: true });
   const server = await startBridgeServer({
     dataDir: options.dataDir,
+    legacyDataDirs: legacyDataDirs(options.dataDir),
     port: options.port,
     host: options.host,
     ...(options.notify ? { notify: createDesktopNotifier() } : {}),
     checkHooks: () => outdatedHookProviders(),
     playSound: createSoundPlayer(),
   });
-  process.stdout.write(`agent-fold-bridge listening on ${options.host}:${server.port}\n`);
+  process.stdout.write(`hommies-bridge listening on ${options.host}:${server.port}\n`);
   const shutdown = async (): Promise<void> => {
     await server.close();
     process.exit(0);
@@ -72,6 +77,6 @@ async function main(): Promise<void> {
 }
 
 void main().catch((error: unknown) => {
-  process.stderr.write(`agent-fold-bridge failed: ${String(error)}\n`);
+  process.stderr.write(`hommies-bridge failed: ${String(error)}\n`);
   process.exit(1);
 });

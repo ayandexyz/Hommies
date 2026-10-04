@@ -70,7 +70,7 @@ test("a tool call clears the session's turn-end item", async () => {
 
 test("the compiled Claude hook reports tool calls silently and keeps AskUserQuestion blocking", async () => {
   await withServer(async ({ request, dataDir }) => {
-    const env = { AGENT_FOLD_DATA_DIR: dataDir };
+    const env = { HOMMIES_DATA_DIR: dataDir };
     const stdout = await runHook("claude-hook.js", {
       hook_event_name: "PreToolUse", session_id: "k1", cwd: "/w/app", tool_name: "Write",
       tool_input: { file_path: "/w/app/big.txt", content: "x".repeat(10_000) },
@@ -101,7 +101,7 @@ test("the compiled Codex hook reports tool calls without answering them", async 
   await withServer(async ({ request, dataDir }) => {
     const stdout = await runHook("codex-hook.js", {
       hook_event_name: "PreToolUse", session_id: "c2", cwd: "/w/app", tool_name: "Bash", tool_input: { command: "ls -la" },
-    }, { AGENT_FOLD_DATA_DIR: dataDir });
+    }, { HOMMIES_DATA_DIR: dataDir });
     assert.equal(stdout, "");
     const snapshot = await pending(request);
     assert.equal(snapshot.totalCount, 0, "a tool call is never sent as a permission");
@@ -154,7 +154,7 @@ test("the compiled Claude hook reports StopFailure without writing to stdout", a
   await withServer(async ({ request, dataDir }) => {
     const stdout = await runHook("claude-hook.js", {
       hook_event_name: "StopFailure", session_id: "k5", cwd: "/w/app", error: "server_error", error_details: "500",
-    }, { AGENT_FOLD_DATA_DIR: dataDir });
+    }, { HOMMIES_DATA_DIR: dataDir });
     assert.equal(stdout, "");
     const item = (await pending(request)).threads[0].items[0];
     assert.deepEqual([item.provider, item.failure, item.summary], ["claude", "error", "API unavailable \u2014 retry: 500"]);
@@ -181,11 +181,11 @@ async function pending(request) {
 }
 
 async function withServer(run, options = {}) {
-  const dataDir = await mkdtemp(join(tmpdir(), "agent-fold-activity-test-"));
+  const dataDir = await mkdtemp(join(tmpdir(), "hommies-activity-test-"));
   const server = await startBridgeServer({ dataDir, port: 0, ...options });
   try {
     const connection = JSON.parse(await readFile(join(dataDir, "port.json"), "utf8"));
-    const headers = { "content-type": "application/json", "x-agent-fold-token": connection.token };
+    const headers = { "content-type": "application/json", "x-hommies-token": connection.token };
     const request = (method, path, body) => fetch(`http://127.0.0.1:${server.port}${path}`, {
       method, headers, ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });

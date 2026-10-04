@@ -10,9 +10,9 @@ import { checkHooks, commandHookFingerprint, outdatedHookProviders, runSetup } f
 const install = { uninstall: false, dryRun: false, providers: ["claude", "codex", "opencode"] };
 
 async function withHome(run) {
-  const home = await mkdtemp(join(tmpdir(), "agent-fold-check-"));
+  const home = await mkdtemp(join(tmpdir(), "hommies-check-"));
   try {
-    await run({ home, environment: { home, env: {}, distDir: "/opt/agent-fold/dist" } });
+    await run({ home, environment: { home, env: {}, distDir: "/opt/hommies/dist" } });
   } finally {
     await rm(home, { recursive: true, force: true });
   }
@@ -43,7 +43,7 @@ test("hook checks report missing, current, and outdated hooks", async () => {
 });
 
 test("the fingerprint ignores the order of the user's own hooks", () => {
-  const ours = { type: "command", command: "node /opt/agent-fold/dist/claude-hook.js", timeout: 5 };
+  const ours = { type: "command", command: "node /opt/hommies/dist/claude-hook.js", timeout: 5 };
   const theirs = { type: "command", command: "say done" };
   const before = { hooks: { Stop: [{ hooks: [ours] }, { hooks: [theirs] }] } };
   const after = { hooks: { Stop: [{ hooks: [theirs] }, { hooks: [ours] }] } };
@@ -53,17 +53,17 @@ test("the fingerprint ignores the order of the user's own hooks", () => {
 
 test("the bridge publishes outdated hooks only when there are some", async () => {
   let outdated = ["codex", "claude"];
-  const dataDir = await mkdtemp(join(tmpdir(), "agent-fold-check-bridge-"));
+  const dataDir = await mkdtemp(join(tmpdir(), "hommies-check-bridge-"));
   const server = await startBridgeServer({ dataDir, port: 0, checkHooks: async () => outdated });
   try {
     const { token } = JSON.parse(await readFile(join(dataDir, "port.json"), "utf8"));
-    const pending = async () => (await fetch(`http://127.0.0.1:${server.port}/v1/pending`, { headers: { "x-agent-fold-token": token } })).json();
+    const pending = async () => (await fetch(`http://127.0.0.1:${server.port}/v1/pending`, { headers: { "x-hommies-token": token } })).json();
     assert.deepEqual((await pending()).hooksOutdated, ["claude", "codex"]);
     outdated = [];
     const fresh = await startBridgeServer({ dataDir: join(dataDir, "second"), port: 0, checkHooks: async () => outdated });
     try {
       const second = JSON.parse(await readFile(join(dataDir, "second", "port.json"), "utf8"));
-      const snapshot = await (await fetch(`http://127.0.0.1:${fresh.port}/v1/pending`, { headers: { "x-agent-fold-token": second.token } })).json();
+      const snapshot = await (await fetch(`http://127.0.0.1:${fresh.port}/v1/pending`, { headers: { "x-hommies-token": second.token } })).json();
       assert.equal("hooksOutdated" in snapshot, false);
     } finally {
       await fresh.close();

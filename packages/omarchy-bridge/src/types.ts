@@ -16,6 +16,11 @@ import type { BridgeSoundPlayer } from "./sound.js";
  */
 export interface BridgeServerOptions {
   readonly dataDir: string;
+  /**
+   * Folders that also get a copy of `port.json`, for readers from before the
+   * rename to Hommies (Omacode reads `$XDG_DATA_HOME/agent-fold/port.json`).
+   */
+  readonly legacyDataDirs?: ReadonlyArray<string>;
   readonly port: number;
   readonly host?: string;
   /**
@@ -26,7 +31,7 @@ export interface BridgeServerOptions {
   /** Focuses a session's terminal for `POST /v1/focus`. Defaults to `hyprctl`; tests pass a stub. */
   readonly focusWindow?: FocusWindow;
   /**
-   * Returns the agents whose agent-fold hooks are out of date. Run at start
+   * Returns the agents whose Hommies hooks are out of date. Run at start
    * and every minute; `runtime.ts` passes `outdatedHookProviders`.
    */
   readonly checkHooks?: () => Promise<ReadonlyArray<string>>;
@@ -133,7 +138,7 @@ export interface PendingResponse {
    * `totalCount`: nothing here needs an answer. Optional for HTTP compatibility.
    */
   readonly sessions?: ReadonlyArray<SessionActivity>;
-  /** Agents whose hooks differ from what `agent-fold setup` writes. Absent when none are. */
+  /** Agents whose hooks differ from what `hommies setup` writes. Absent when none are. */
   readonly hooksOutdated?: ReadonlyArray<string>;
 }
 
@@ -196,7 +201,7 @@ export interface ClaudePermissionHookInput extends AgentProcessFields {
   readonly tool_name: string;
   readonly tool_input: Record<string, unknown>;
   readonly permission_suggestions?: ReadonlyArray<unknown>;
-  /** Added by agent-fold's hook adapter from the session transcript. */
+  /** Added by our hook adapter from the session transcript. */
   readonly session_title?: string;
   /**
    * OpenCode's own permission id (`per_...`). The OpenCode plugin sends it so
@@ -208,7 +213,7 @@ export interface ClaudePermissionHookInput extends AgentProcessFields {
 
 /**
  * A question from OpenCode's or Omacode's `question` tool, as sent by the
- * OpenCode plugin or Omacode's built-in agent-fold integration.
+ * OpenCode plugin or Omacode's built-in Hommies integration (`agent-fold.ts` upstream).
  */
 export interface OpenCodeQuestionInput extends AgentProcessFields {
   readonly session_id: string;

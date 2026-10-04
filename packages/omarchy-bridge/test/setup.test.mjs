@@ -4,34 +4,35 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { isAgentFoldCommand, mergeClaudeSettings, mergeOpenCodeConfig, runSetup } from "../dist/setup.js";
+import { isHommiesCommand, mergeClaudeSettings, mergeOpenCodeConfig, runSetup } from "../dist/setup.js";
 
 const install = { uninstall: false, dryRun: false, providers: ["claude", "codex", "opencode"] };
 const uninstall = { ...install, uninstall: true };
 const readJson = async (path) => JSON.parse(await readFile(path, "utf8"));
 
 async function withHome(run) {
-  const home = await mkdtemp(join(tmpdir(), "agent-fold-setup-"));
+  const home = await mkdtemp(join(tmpdir(), "hommies-setup-"));
   try {
-    await run({ home, environment: { home, env: {}, distDir: "/opt/agent-fold/dist" } });
+    await run({ home, environment: { home, env: {}, distDir: "/opt/hommies/dist" } });
   } finally {
     await rm(home, { recursive: true, force: true });
   }
 }
 
 test("hook commands are recognized across install locations", () => {
-  assert.ok(isAgentFoldCommand("node /usr/lib/node_modules/@thisisayande/agent-fold/dist/claude-hook.js", "claude-hook.js"));
-  assert.ok(isAgentFoldCommand("node /usr/lib/node_modules/@thisisayande/hommies/dist/claude-hook.js", "claude-hook.js"));
-  assert.ok(isAgentFoldCommand(
+  assert.ok(isHommiesCommand("node /usr/lib/node_modules/@thisisayande/agent-fold/dist/claude-hook.js", "claude-hook.js"));
+  assert.ok(isHommiesCommand("node /usr/lib/node_modules/@thisisayande/hommies/dist/claude-hook.js", "claude-hook.js"));
+  assert.ok(isHommiesCommand(
     "test -f /usr/lib/node_modules/@thisisayande/hommies/dist/claude-hook.js && node /usr/lib/node_modules/@thisisayande/hommies/dist/claude-hook.js || true",
     "claude-hook.js"));
-  assert.ok(isAgentFoldCommand("node /src/agent-fold/packages/omarchy-bridge/dist/claude-hook.js", "claude-hook.js"));
-  assert.ok(isAgentFoldCommand("agent-fold-claude-hook", "claude-hook.js"));
-  assert.ok(!isAgentFoldCommand("node /other/tool/claude-hook.js", "claude-hook.js"));
-  assert.ok(!isAgentFoldCommand("node /opt/agent-fold/dist/codex-hook.js", "claude-hook.js"));
+  assert.ok(isHommiesCommand("node /src/agent-fold/packages/omarchy-bridge/dist/claude-hook.js", "claude-hook.js"));
+  assert.ok(isHommiesCommand("hommies-claude-hook", "claude-hook.js"));
+  assert.ok(isHommiesCommand("agent-fold-claude-hook", "claude-hook.js"), "the bin name from before the rename");
+  assert.ok(!isHommiesCommand("node /other/tool/claude-hook.js", "claude-hook.js"));
+  assert.ok(!isHommiesCommand("node /opt/hommies/dist/codex-hook.js", "claude-hook.js"));
 });
 
-test("Claude hooks merge beside the user's own hooks and replace stale agent-fold entries", () => {
+test("Claude hooks merge beside the user's own hooks and replace stale entries", () => {
   const userStop = { hooks: [{ type: "command", command: "say done" }] };
   const settings = {
     model: "opus",
@@ -39,29 +40,29 @@ test("Claude hooks merge beside the user's own hooks and replace stale agent-fol
       Stop: [userStop, { hooks: [{ type: "command", command: "node /old/agent-fold/dist/claude-hook.js", timeout: 5 }] }],
     },
   };
-  const next = mergeClaudeSettings(settings, "node /new/agent-fold/dist/claude-hook.js");
+  const next = mergeClaudeSettings(settings, "node /new/hommies/dist/claude-hook.js");
   assert.equal(next.model, "opus");
-  assert.deepEqual(next.hooks.Stop, [userStop, { hooks: [{ type: "command", command: "node /new/agent-fold/dist/claude-hook.js", timeout: 5 }] }]);
-  assert.deepEqual(next.hooks.PreToolUse, [{ matcher: "*", hooks: [{ type: "command", command: "node /new/agent-fold/dist/claude-hook.js" }] }]);
-  assert.deepEqual(next.hooks.PostToolUse, [{ matcher: "AskUserQuestion", hooks: [{ type: "command", command: "node /new/agent-fold/dist/claude-hook.js" }] }]);
+  assert.deepEqual(next.hooks.Stop, [userStop, { hooks: [{ type: "command", command: "node /new/hommies/dist/claude-hook.js", timeout: 5 }] }]);
+  assert.deepEqual(next.hooks.PreToolUse, [{ matcher: "*", hooks: [{ type: "command", command: "node /new/hommies/dist/claude-hook.js" }] }]);
+  assert.deepEqual(next.hooks.PostToolUse, [{ matcher: "AskUserQuestion", hooks: [{ type: "command", command: "node /new/hommies/dist/claude-hook.js" }] }]);
   assert.equal(next.hooks.SessionStart[0].hooks[0].timeout, 5);
   assert.equal(next.hooks.StopFailure[0].hooks[0].timeout, 5);
   assert.equal(next.hooks.PermissionRequest[0].hooks[0].timeout, 305);
-  assert.deepEqual(mergeClaudeSettings(next, "node /new/agent-fold/dist/claude-hook.js"), next, "setup is idempotent");
+  assert.deepEqual(mergeClaudeSettings(next, "node /new/hommies/dist/claude-hook.js"), next, "setup is idempotent");
   assert.deepEqual(mergeClaudeSettings(next, null), { model: "opus", hooks: { Stop: [userStop] } });
 });
 
-test("uninstall leaves configs without agent-fold entries untouched", () => {
+test("uninstall leaves configs without our entries untouched", () => {
   const settings = { hooks: {} };
   assert.equal(mergeClaudeSettings(settings, null), settings);
   const openCode = { plugin: [] };
   assert.equal(mergeOpenCodeConfig(openCode, null), openCode);
 });
 
-test("OpenCode keeps other plugins and swaps the agent-fold entry", () => {
+test("OpenCode keeps other plugins and swaps our entry", () => {
   const config = { plugin: ["opencode-foo", "file:///old/@agent-fold/bridge/dist/opencode-plugin.js"] };
-  assert.deepEqual(mergeOpenCodeConfig(config, "file:///opt/agent-fold/dist/opencode-plugin.js").plugin,
-    ["opencode-foo", "file:///opt/agent-fold/dist/opencode-plugin.js"]);
+  assert.deepEqual(mergeOpenCodeConfig(config, "file:///opt/hommies/dist/opencode-plugin.js").plugin,
+    ["opencode-foo", "file:///opt/hommies/dist/opencode-plugin.js"]);
   assert.deepEqual(mergeOpenCodeConfig(config, null), { plugin: ["opencode-foo"] });
 });
 
@@ -81,9 +82,9 @@ test("setup writes each installed agent's config, backs up, and uninstall restor
     const written = await readJson(settings);
     assert.equal(written.theme, "dark");
     assert.equal(written.hooks.Stop[0].hooks[0].command,
-      "test -f /opt/agent-fold/dist/claude-hook.js && node /opt/agent-fold/dist/claude-hook.js || true");
+      "test -f /opt/hommies/dist/claude-hook.js && node /opt/hommies/dist/claude-hook.js || true");
     assert.deepEqual((await readJson(join(home, ".config", "opencode", "opencode.json"))).plugin,
-      ["file:///opt/agent-fold/dist/opencode-plugin.js"]);
+      ["file:///opt/hommies/dist/opencode-plugin.js"]);
 
     assert.deepEqual((await runSetup(install, environment)).map((result) => result.status), ["unchanged", "skipped", "unchanged"]);
 
@@ -118,6 +119,6 @@ test("a symlinked config is updated through the link", async () => {
 
     await runSetup({ ...install, providers: ["codex"] }, environment);
     const hooks = (await readJson(real)).hooks;
-    assert.deepEqual(hooks.PermissionRequest, [{ matcher: "*", hooks: [{ type: "command", command: "test -f /opt/agent-fold/dist/codex-hook.js && node /opt/agent-fold/dist/codex-hook.js || true", timeout: 305 }] }]);
+    assert.deepEqual(hooks.PermissionRequest, [{ matcher: "*", hooks: [{ type: "command", command: "test -f /opt/hommies/dist/codex-hook.js && node /opt/hommies/dist/codex-hook.js || true", timeout: 305 }] }]);
   });
 });

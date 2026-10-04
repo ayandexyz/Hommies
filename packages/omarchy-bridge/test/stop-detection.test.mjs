@@ -58,7 +58,7 @@ test("session titles prefer /rename over the latest generated title", () => {
 test("threads expose the session title and project folder", async () => {
   await withServer(async ({ request }) => {
     await request("POST", "/v1/providers/claude/stop", {
-      hook_event_name: "Stop", session_id: "t1", cwd: "/home/me/agent-fold",
+      hook_event_name: "Stop", session_id: "t1", cwd: "/home/me/hommies",
       last_assistant_message: "Ship it?", session_title: "Stop hook detection",
     });
     await request("POST", "/v1/providers/claude/stop", {
@@ -66,8 +66,8 @@ test("threads expose the session title and project folder", async () => {
     });
     const [titled, untitled] = (await pending(request)).threads;
     assert.equal(titled.sessionTitle, "Stop hook detection");
-    assert.equal(titled.project, "agent-fold");
-    assert.equal(titled.title, "Claude Code — agent-fold", "title stays backward compatible");
+    assert.equal(titled.project, "hommies");
+    assert.equal(titled.title, "Claude Code — hommies", "title stays backward compatible");
     assert.equal(untitled.sessionTitle, undefined);
     assert.equal(untitled.project, "other");
   });
@@ -131,11 +131,11 @@ async function pending(request) {
 }
 
 async function withServer(run) {
-  const dataDir = await mkdtemp(join(tmpdir(), "agent-fold-stop-test-"));
+  const dataDir = await mkdtemp(join(tmpdir(), "hommies-stop-test-"));
   const server = await startBridgeServer({ dataDir, port: 0 });
   try {
     const connection = JSON.parse(await readFile(join(dataDir, "port.json"), "utf8"));
-    const headers = { "content-type": "application/json", "x-agent-fold-token": connection.token };
+    const headers = { "content-type": "application/json", "x-hommies-token": connection.token };
     const request = (method, path, body) => fetch(`http://127.0.0.1:${server.port}${path}`, {
       method, headers, ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });

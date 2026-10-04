@@ -1,9 +1,9 @@
 /**
- * Registers (or removes) the agent-fold hooks in each agent's own config:
+ * Registers (or removes) the Hommies hooks in each agent's own config:
  * Claude Code `settings.json`, Codex `hooks.json`, and OpenCode `opencode.json`.
  *
  * Merges never drop the user's other hooks or plugins. An entry belongs to
- * agent-fold when its command runs one of our hook files, so re-running setup
+ * Hommies when its command runs one of our hook files, so re-running setup
  * replaces stale paths instead of duplicating them, and uninstall removes only
  * what setup added. Every changed file is backed up and replaced atomically.
  */
@@ -70,16 +70,19 @@ export const hookCommand = (hookPath: string): string => {
 /** Install paths that belong to us: the current package, its old name, and a source checkout. */
 const OUR_PATH = /hommies|agent-fold|omarchy-bridge/;
 
-/** True for a command that runs agent-fold's `hookFile` (any install location). */
-export function isAgentFoldCommand(command: unknown, hookFile: string): boolean {
+/**
+ * True for a command that runs our `hookFile` (any install location), under
+ * the `hommies-*` bin names or the `agent-fold-*` ones from before the rename.
+ */
+export function isHommiesCommand(command: unknown, hookFile: string): boolean {
   if (typeof command !== "string") return false;
-  const bin = `agent-fold-${hookFile.replace(/\.js$/, "")}`;
-  if (new RegExp(`(^|[\\s/'"])${bin}(['"\\s]|$)`).test(command)) return true;
+  const hook = hookFile.replace(/\.js$/, "");
+  if (new RegExp(`(^|[\\s/'"])(hommies|agent-fold)-${hook}(['"\\s]|$)`).test(command)) return true;
   return command.includes(`/${hookFile}`) && OUR_PATH.test(command);
 }
 
 /**
- * Returns a copy of a `{ hooks: { Event: [group] } }` config with agent-fold's
+ * Returns a copy of a `{ hooks: { Event: [group] } }` config with our
  * hook entries removed and, when `command` is given, re-added once per spec.
  */
 export function mergeCommandHooks(
@@ -90,7 +93,7 @@ export function mergeCommandHooks(
 ): JsonObject {
   const next: JsonObject = { ...config };
   const hooks: JsonObject = isObject(config.hooks) ? { ...config.hooks } : {};
-  const ours = (entry: unknown): boolean => isObject(entry) && isAgentFoldCommand(entry.command, hookFile);
+  const ours = (entry: unknown): boolean => isObject(entry) && isHommiesCommand(entry.command, hookFile);
   let removed = false;
 
   for (const event of Object.keys(hooks)) {
@@ -123,8 +126,8 @@ export function mergeCommandHooks(
 }
 
 /**
- * agent-fold's own entries in a command-hook config, one sorted line per
- * entry. Two configs with the same lines have the same agent-fold hooks,
+ * Our own entries in a command-hook config, one sorted line per
+ * entry. Two configs with the same lines have the same Hommies hooks,
  * whatever the order of the user's other hooks.
  */
 export function commandHookFingerprint(config: JsonObject, hookFile: string): string[] {
@@ -135,7 +138,7 @@ export function commandHookFingerprint(config: JsonObject, hookFile: string): st
     for (const group of groups) {
       if (!isObject(group) || !Array.isArray(group.hooks)) continue;
       for (const entry of group.hooks) {
-        if (!isObject(entry) || !isAgentFoldCommand(entry.command, hookFile)) continue;
+        if (!isObject(entry) || !isHommiesCommand(entry.command, hookFile)) continue;
         lines.push(JSON.stringify([event, group.matcher ?? null, entry.command, entry.timeout ?? null]));
       }
     }
@@ -157,7 +160,7 @@ export const mergeClaudeSettings = (config: JsonObject, command: string | null):
 export const mergeCodexHooks = (config: JsonObject, command: string | null): JsonObject =>
   mergeCommandHooks(config, CODEX_HOOKS, "codex-hook.js", command);
 
-/** Returns a copy of an OpenCode config with agent-fold's plugin entry replaced (or removed when `pluginUrl` is null). */
+/** Returns a copy of an OpenCode config with our plugin entry replaced (or removed when `pluginUrl` is null). */
 export function mergeOpenCodeConfig(config: JsonObject, pluginUrl: string | null): JsonObject {
   const next: JsonObject = { ...config };
   const plugins = Array.isArray(config.plugin) ? config.plugin : [];
@@ -199,7 +202,7 @@ interface ProviderTarget {
   readonly configDir: string;
   readonly file: string;
   readonly merge: (config: JsonObject, install: boolean) => JsonObject;
-  /** agent-fold's entries in a config; see `commandHookFingerprint`. */
+  /** Our entries in a config; see `commandHookFingerprint`. */
   readonly fingerprint: (config: JsonObject) => string[];
   /** Config variants setup cannot edit safely; when one exists the provider is skipped. */
   readonly unsupported?: string;
@@ -261,7 +264,7 @@ async function writeConfig(path: string, config: JsonObject, backupSuffix: strin
   const previous = await stat(target).catch(() => null);
   let backup: string | undefined;
   if (previous !== null) {
-    backup = `${target}.agent-fold-backup-${backupSuffix}`;
+    backup = `${target}.hommies-backup-${backupSuffix}`;
     await copyFile(target, backup);
   }
   const temp = join(dirname(target), `.${basename(target)}.${randomBytes(6).toString("hex")}.tmp`);
@@ -301,7 +304,7 @@ export async function runSetup(options: SetupOptions, environment: SetupEnvironm
         results.push({ provider, file, status: "unchanged", message: "already up to date" });
         continue;
       }
-      const verb = options.uninstall ? "removed agent-fold" : "registered agent-fold";
+      const verb = options.uninstall ? "removed Hommies hooks" : "registered Hommies hooks";
       if (options.dryRun) {
         results.push({ provider, file, status: "updated", message: `would have ${verb}` });
         continue;
@@ -318,9 +321,9 @@ export async function runSetup(options: SetupOptions, environment: SetupEnvironm
 
 /**
  * - `current`: the config has exactly the hooks setup would write
- * - `outdated`: it has agent-fold hooks, but not those (missing events, old
+ * - `outdated`: it has Hommies hooks, but not those (missing events, old
  *   paths, edited matchers or timeouts)
- * - `missing`: the agent is installed but has no agent-fold hooks
+ * - `missing`: the agent is installed but has no Hommies hooks
  * - `not-installed`, `unsupported` (OpenCode JSONC), `error` (unreadable config)
  */
 export type HookStatus = "current" | "outdated" | "missing" | "not-installed" | "unsupported" | "error";
@@ -362,7 +365,7 @@ export async function checkHooks(
   return checks;
 }
 
-/** Providers whose agent-fold hooks exist but differ from what setup would write. */
+/** Providers whose Hommies hooks exist but differ from what setup would write. */
 export async function outdatedHookProviders(environment: SetupEnvironment = defaultSetupEnvironment()): Promise<SetupProvider[]> {
   return (await checkHooks(environment)).filter((check) => check.status === "outdated").map((check) => check.provider);
 }

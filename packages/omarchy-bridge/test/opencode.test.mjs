@@ -7,7 +7,7 @@ import test from "node:test";
 import * as pluginModule from "../dist/opencode-plugin.js";
 import { startBridgeServer } from "../dist/server.js";
 
-const { AgentFoldOpenCode } = pluginModule;
+const { HommiesOpenCode } = pluginModule;
 
 const sessions = {
   root: { id: "ses_root", directory: "/home/me/proj", title: "Wire up OpenCode" },
@@ -17,7 +17,7 @@ const sessions = {
 
 test("the plugin module exports only the plugin", () => {
   // OpenCode calls every export of a plugin module as a plugin.
-  assert.deepEqual(Object.keys(pluginModule), ["AgentFoldOpenCode"]);
+  assert.deepEqual(Object.keys(pluginModule), ["HommiesOpenCode"]);
 });
 
 test("a subagent's permission is listed under its root session and accepted from the bar", async () => {
@@ -143,17 +143,17 @@ test("turn ends become attention or finished items; subagents, placeholders, and
 });
 
 test("without the in-process client the plugin only stays out of the way", async () => {
-  const plugin = await AgentFoldOpenCode({ client: {} });
+  const plugin = await HommiesOpenCode({ client: {} });
   await plugin.event({ event: { type: "permission.asked", properties: { id: "per_x", sessionID: "s" } } });
   await plugin.event({ event: { type: "session.idle", properties: { sessionID: "s" } } });
 });
 
 /** A fake of OpenCode's in-process client plus a live bridge the plugin can find. */
 async function withPlugin(run, options = {}) {
-  const dataDir = await mkdtemp(join(tmpdir(), "agent-fold-opencode-test-"));
+  const dataDir = await mkdtemp(join(tmpdir(), "hommies-opencode-test-"));
   const server = await startBridgeServer({ dataDir, port: 0, ...options });
-  const previousDataDir = process.env.AGENT_FOLD_DATA_DIR;
-  process.env.AGENT_FOLD_DATA_DIR = dataDir;
+  const previousDataDir = process.env.HOMMIES_DATA_DIR;
+  process.env.HOMMIES_DATA_DIR = dataDir;
   const replies = [];
   const messages = {};
   const http = {
@@ -172,15 +172,15 @@ async function withPlugin(run, options = {}) {
   };
   try {
     const connection = JSON.parse(await readFile(join(dataDir, "port.json"), "utf8"));
-    const headers = { "content-type": "application/json", "x-agent-fold-token": connection.token };
+    const headers = { "content-type": "application/json", "x-hommies-token": connection.token };
     const request = (method, path, body) => fetch(`http://127.0.0.1:${server.port}${path}`, {
       method, headers, ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
-    const plugin = await AgentFoldOpenCode({ client: { _client: http } });
+    const plugin = await HommiesOpenCode({ client: { _client: http } });
     await run({ request, plugin, replies, messages });
   } finally {
-    if (previousDataDir === undefined) delete process.env.AGENT_FOLD_DATA_DIR;
-    else process.env.AGENT_FOLD_DATA_DIR = previousDataDir;
+    if (previousDataDir === undefined) delete process.env.HOMMIES_DATA_DIR;
+    else process.env.HOMMIES_DATA_DIR = previousDataDir;
     await server.close();
     await rm(dataDir, { recursive: true, force: true });
   }

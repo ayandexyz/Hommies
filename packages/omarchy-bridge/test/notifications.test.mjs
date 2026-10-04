@@ -11,7 +11,7 @@ test("every new item sends one notification named after its session", async () =
   const sent = [];
   await withServer({ notify: (notification) => sent.push(notification) }, async ({ request }) => {
     await request("POST", "/v1/providers/claude/stop", {
-      hook_event_name: "Stop", session_id: "s1", cwd: "/home/me/agent-fold",
+      hook_event_name: "Stop", session_id: "s1", cwd: "/home/me/hommies",
       session_title: "Stop hook detection", last_assistant_message: "Should I commit?",
     });
     await request("POST", "/v1/providers/claude/stop", {
@@ -45,7 +45,7 @@ test("notifications can be turned off through preferences", async () => {
 });
 
 test("notify-send is called without a shell and replaces per session", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "agent-fold-notify-test-"));
+  const dir = await mkdtemp(join(tmpdir(), "hommies-notify-test-"));
   try {
     const log = join(dir, "calls.jsonl");
     const stub = join(dir, "notify-send");
@@ -84,11 +84,11 @@ async function waitForLines(path, count) {
 }
 
 async function withServer(options, run) {
-  const dataDir = await mkdtemp(join(tmpdir(), "agent-fold-notify-server-"));
+  const dataDir = await mkdtemp(join(tmpdir(), "hommies-notify-server-"));
   const server = await startBridgeServer({ dataDir, port: 0, ...options });
   try {
     const connection = JSON.parse(await readFile(join(dataDir, "port.json"), "utf8"));
-    const headers = { "content-type": "application/json", "x-agent-fold-token": connection.token };
+    const headers = { "content-type": "application/json", "x-hommies-token": connection.token };
     const request = (method, path, body) => fetch(`http://127.0.0.1:${server.port}${path}`, {
       method, headers, ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });

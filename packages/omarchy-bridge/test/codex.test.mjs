@@ -72,14 +72,14 @@ test("the compiled Codex hook reads the rollout and session index", async () => 
 
     const stdout = await runHook("codex-hook.js", { hook_event_name: "Stop", session_id: "c9", cwd: "/w/app",
       transcript_path: rollout, last_assistant_message: null, stop_hook_active: false,
-      turn_id: "t", model: "m", permission_mode: "default" }, { AGENT_FOLD_DATA_DIR: dataDir, CODEX_HOME: codexHome });
+      turn_id: "t", model: "m", permission_mode: "default" }, { HOMMIES_DATA_DIR: dataDir, CODEX_HOME: codexHome });
     assert.equal(stdout, "", "turn hooks never write to stdout");
     const thread = (await pending(request)).threads[0];
     assert.equal(thread.sessionTitle, "Rollout test");
     assert.deepEqual(thread.items.map((item) => [item.provider, item.kind, item.summary]), [["codex", "finished", "All tests pass."]]);
 
     assert.equal(await runHook("codex-hook.js", { hook_event_name: "SessionEnd", session_id: "c9", cwd: "/w/app",
-      transcript_path: rollout, reason: "other" }, { AGENT_FOLD_DATA_DIR: dataDir, CODEX_HOME: codexHome }), "");
+      transcript_path: rollout, reason: "other" }, { HOMMIES_DATA_DIR: dataDir, CODEX_HOME: codexHome }), "");
     assert.equal((await pending(request)).totalCount, 0);
   });
 });
@@ -92,7 +92,7 @@ test("the compiled Claude hook still reports turn ends after the refactor", asyn
       JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "Should I merge?" }] } }),
     ].join("\n"));
     const stdout = await runHook("claude-hook.js", { hook_event_name: "Stop", session_id: "k1", cwd: "/w/app",
-      transcript_path: transcript, stop_hook_active: false }, { AGENT_FOLD_DATA_DIR: dataDir });
+      transcript_path: transcript, stop_hook_active: false }, { HOMMIES_DATA_DIR: dataDir });
     assert.equal(stdout, "");
     const thread = (await pending(request)).threads[0];
     assert.equal(thread.sessionTitle, "Claude session");
@@ -116,11 +116,11 @@ async function pending(request) {
 }
 
 async function withServer(options, run) {
-  const dataDir = await mkdtemp(join(tmpdir(), "agent-fold-codex-test-"));
+  const dataDir = await mkdtemp(join(tmpdir(), "hommies-codex-test-"));
   const server = await startBridgeServer({ dataDir, port: 0, ...options });
   try {
     const connection = JSON.parse(await readFile(join(dataDir, "port.json"), "utf8"));
-    const headers = { "content-type": "application/json", "x-agent-fold-token": connection.token };
+    const headers = { "content-type": "application/json", "x-hommies-token": connection.token };
     const request = (method, path, body) => fetch(`http://127.0.0.1:${server.port}${path}`, {
       method, headers, ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });

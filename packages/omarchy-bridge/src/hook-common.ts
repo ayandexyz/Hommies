@@ -51,16 +51,32 @@ export function isActivityEvent(event: ActivityHookEvent): boolean {
 /** The `tool_input` fields the bridge labels steps with; file contents and diffs stay behind. */
 const stepFields = ["command", "file_path", "notebook_path", "path", "pattern", "query", "url", "description"];
 
+const dataHome = (): string => process.env.XDG_DATA_HOME ?? join(homedir(), ".local", "share");
+
+/**
+ * Where the bridge keeps `port.json`. `AGENT_FOLD_DATA_DIR` and the
+ * `agent-fold` folder are the names from before the rename to Hommies.
+ */
+export function bridgeDataDirs(): string[] {
+  const override = process.env.HOMMIES_DATA_DIR || process.env.AGENT_FOLD_DATA_DIR;
+  return override ? [override] : [join(dataHome(), "hommies"), join(dataHome(), "agent-fold")];
+}
+
 /** The running bridge's port and token, or `null` when it is not running. */
 export async function readConnection(): Promise<BridgeConnection | null> {
-  const dataDir = process.env.AGENT_FOLD_DATA_DIR ?? join(process.env.XDG_DATA_HOME ?? join(homedir(), ".local", "share"), "agent-fold");
-  try {
-    const connection = JSON.parse(await readFile(join(dataDir, "port.json"), "utf8")) as BridgeConnection;
-    return Number.isInteger(connection.port) && typeof connection.token === "string" ? connection : null;
-  } catch {
-    return null;
+  for (const dataDir of bridgeDataDirs()) {
+    try {
+      const connection = JSON.parse(await readFile(join(dataDir, "port.json"), "utf8")) as BridgeConnection;
+      if (Number.isInteger(connection.port) && typeof connection.token === "string") return connection;
+    } catch {
+      // Not running from this folder; try the next one.
+    }
   }
+  return null;
 }
+
+/** The token under both header names, so a bridge from before the rename still accepts it. */
+export const tokenHeaders = (token: string): Record<string, string> => ({ "x-hommies-token": token, "x-agent-fold-token": token });
 
 export async function readStdin(): Promise<string> {
   let input = "";
@@ -71,7 +87,7 @@ export async function readStdin(): Promise<string> {
 export function postToBridge(connection: BridgeConnection, path: string, body: string, timeoutMs: number): Promise<Response> {
   return fetch(`http://127.0.0.1:${connection.port}${path}`, {
     method: "POST",
-    headers: { "content-type": "application/json", "x-agent-fold-token": connection.token },
+    headers: { "content-type": "application/json", ...tokenHeaders(connection.token) },
     body,
     signal: AbortSignal.timeout(timeoutMs),
   });

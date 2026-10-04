@@ -68,11 +68,11 @@ async function firstItem(request) {
 }
 
 async function withServer(run) {
-  const dataDir = await mkdtemp(join(tmpdir(), "agent-fold-always-test-"));
+  const dataDir = await mkdtemp(join(tmpdir(), "hommies-always-test-"));
   const server = await startBridgeServer({ dataDir, port: 0 });
   try {
     const connection = JSON.parse(await readFile(join(dataDir, "port.json"), "utf8"));
-    const headers = { "content-type": "application/json", "x-agent-fold-token": connection.token };
+    const headers = { "content-type": "application/json", "x-hommies-token": connection.token };
     const request = (method, path, body) => fetch(`http://127.0.0.1:${server.port}${path}`, {
       method, headers, ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });

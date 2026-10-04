@@ -1,17 +1,17 @@
 {
   "name": "@thisisayande/hommies",
-  "version": "0.1.1",
-  "description": "Localhost HTTP bridge that exposes pending coding-agent questions and permissions to the agent-fold Omarchy plugin.",
+  "version": "0.1.2",
+  "description": "Localhost bridge and agent hooks for Hommies, the Omarchy companion that surfaces pending coding-agent questions and permissions.",
   "license": "MIT",
   "author": "Ayan De",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/ayandexyz/agent-fold.git",
+    "url": "git+https://github.com/ayandexyz/Hommies.git",
     "directory": "packages/omarchy-bridge"
   },
-  "homepage": "https://github.com/ayandexyz/agent-fold#readme",
+  "homepage": "https://github.com/ayandexyz/Hommies#readme",
   "bugs": {
-    "url": "https://github.com/ayandexyz/agent-fold/issues"
+    "url": "https://github.com/ayandexyz/Hommies/issues"
   },
   "keywords": [
     "omarchy",
@@ -26,6 +26,10 @@
   "types": "./dist/index.d.ts",
   "bin": {
     "hommies": "./dist/cli.js",
+    "hommies-bridge": "./dist/runtime.js",
+    "hommies-claude-hook": "./dist/claude-hook.js",
+    "hommies-codex-hook": "./dist/codex-hook.js",
+    "hommies-hook": "./dist/agent-hook.js",
     "agent-fold": "./dist/cli.js",
     "agent-fold-bridge": "./dist/runtime.js",
     "agent-fold-claude-hook": "./dist/claude-hook.js",
@@ -45,7 +49,8 @@
   "files": [
     "dist",
     "sounds",
-    "README.md"
+    "README.md",
+    "npm-shrinkwrap.json"
   ],
   "engines": {
     "node": ">=20.10.0"
@@ -59,7 +64,7 @@
     "prepublishOnly": "pnpm test"
   },
   "dependencies": {
-    "effect": "^3.10.0"
+    "effect": "3.22.2"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",

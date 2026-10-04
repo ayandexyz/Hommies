@@ -1,4 +1,4 @@
-# agent-fold
+# Hommies
 
 A Omarchy bar plugin that surfaces pending **questions** and **permission requests** from
 coding agents (Claude Code, Codex, OpenCode, Omacode, or any agent with command hooks) so you don't miss
@@ -7,7 +7,7 @@ them when you're away from the chat UI.
 ## Why
 
 YouTube, email, a meeting — and your agent has been waiting on a question for an hour.
-`agent-fold` puts **Hommie** on your screen: the Omarchy mark with a pair of eyes, floating
+`hommies` puts **Hommie** on your screen: the Omarchy mark with a pair of eyes, floating
 wherever you drag it. Hommie shows at a glance whether your agents are working, waiting on
 you, failed, or done, and one click opens the pending items grouped by agent. The classic
 top-bar bell is still available.
@@ -31,7 +31,7 @@ top-bar bell is still available.
 - **Errors and rate limits**: a turn that stopped on an API error or a usage limit shows
   in red or orange, so you know the agent is stuck rather than done.
 - **Go to terminal**: focus the exact Hyprland window (and tmux pane) a session runs in.
-- **Any agent**: point another agent's command hooks at `agent-fold-hook --agent <name>`
+- **Any agent**: point another agent's command hooks at `hommies-hook --agent <name>`
   and it shows up under an **Other** tab.
 - **Desktop notifications** for new items, and optional **sounds** (off by default), each
   with a toggle in the panel.
@@ -45,7 +45,7 @@ This is a pnpm workspace with two packages:
 
 | Path | What it is |
 | --- | --- |
-| `packages/omarchy-bridge/` | A TypeScript npm package: the loopback HTTP bridge (`/v1/pending`, `/v1/respond`, `/v1/focus`, the provider routes, ...), the agent hooks, the OpenCode plugin, and the `agent-fold` setup CLI. Published to npm as `@thisisayande/hommies`. |
+| `packages/omarchy-bridge/` | A TypeScript npm package: the loopback HTTP bridge (`/v1/pending`, `/v1/respond`, `/v1/focus`, the provider routes, ...), the agent hooks, the OpenCode plugin, and the `hommies` setup CLI. Published to npm as `@thisisayande/hommies`. |
 | `packages/bell-plugin/` | The Omarchy plugin itself: `manifest.json`, `Service.qml` (starts the bridge and hosts Hommie), `FloatingBuddy.qml` and `FloatingPanel.qml` (the floating character and its card), `characters/Hommie.qml`, the bar bell (`BarWidget.qml`, `Panel.qml`), and `bridge.js`, which talks to the bridge over HTTP. Distributed as a folder consumable by `omarchy plugin add`. |
 
 ## Status
@@ -53,7 +53,7 @@ This is a pnpm workspace with two packages:
 Working end to end, not yet published to the plugin marketplace.
 
 - **Bridge** (`@thisisayande/hommies`): the HTTP API, the Claude Code and Codex
-  command hooks, the OpenCode plugin, the generic `agent-fold-hook`, desktop
+  command hooks, the OpenCode plugin, the generic `hommies-hook`, desktop
   notifications, sounds, and `hommies setup` are implemented and tested.
 - **Plugin**: the service starts the bridge, restarts it when it exits, and polls
   `/v1/pending` every 3 seconds. Hommie's card (and the bar bell's panel) answers
@@ -75,10 +75,10 @@ See [`docs/roadmap.md`](docs/roadmap.md) for what was planned and how it turned 
 ## Layout
 
 ```
-agent-fold/
+Hommies/
 ├── packages/
 │   ├── omarchy-bridge/   # TS bridge, hooks, OpenCode plugin, setup CLI
-│   └── bell-plugin/      # QML + manifest.json; runs agent-fold-bridge
+│   └── bell-plugin/      # QML + manifest.json; runs hommies-bridge
 ├── docs/roadmap.md
 ├── pnpm-workspace.yaml
 ├── package.json
@@ -120,7 +120,7 @@ To remove it, run `hommies uninstall` before `npm uninstall -g @thisisayande/hom
 left behind by a bare `npm uninstall` do nothing, except OpenCode's plugin entry,
 which you then remove from `opencode.json` by hand.
 
-The plugin starts the bridge (`agent-fold-bridge`) as a background service and
+The plugin starts the bridge (`hommies-bridge`) as a background service and
 restarts it if it exits. After updating the bridge package, run
 `omarchy restart shell` so the running bridge picks up the new code.
 

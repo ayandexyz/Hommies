@@ -73,11 +73,11 @@ async function waitFor(request, done, timeoutMs = 3000) {
 }
 
 async function withServer(run, options = {}) {
-  const dataDir = await mkdtemp(join(tmpdir(), "agent-fold-exit-test-"));
+  const dataDir = await mkdtemp(join(tmpdir(), "hommies-exit-test-"));
   const server = await startBridgeServer({ dataDir, port: 0, ...options });
   try {
     const connection = JSON.parse(await readFile(join(dataDir, "port.json"), "utf8"));
-    const headers = { "content-type": "application/json", "x-agent-fold-token": connection.token };
+    const headers = { "content-type": "application/json", "x-hommies-token": connection.token };
     const request = (method, path, body) => fetch(`http://127.0.0.1:${server.port}${path}`, {
       method, headers, ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });

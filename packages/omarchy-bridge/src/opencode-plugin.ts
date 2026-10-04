@@ -1,6 +1,6 @@
 /**
  * OpenCode server plugin: mirrors permission requests, `question` tool calls,
- * turn ends, and tool activity into agent-fold, and answers OpenCode with what
+ * turn ends, and tool activity into Hommies, and answers OpenCode with what
  * you pick in the bar.
  *
  * OpenCode has no command hooks, so this runs inside OpenCode and talks to it
@@ -50,7 +50,7 @@ const turnTimeoutMs = 2_000;
 /** OpenCode names sessions like this until it has generated a title. */
 const placeholderTitle = /^(New|Child) session - \d{4}-\d{2}-\d{2}T/;
 
-export const AgentFoldOpenCode = async (input: PluginInput) => {
+export const HommiesOpenCode = async (input: PluginInput) => {
   const http = input.client._client;
   /** Child session id → root session id. Parents never change. */
   const roots = new Map<string, string>();

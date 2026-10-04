@@ -49,9 +49,9 @@ test("invalid or reserved agent names are rejected", async () => {
   });
 });
 
-test("agent-fold-hook reports a custom agent and never answers permissions", async () => {
+test("hommies-hook reports a custom agent and never answers permissions", async () => {
   await withServer({}, async ({ request, dataDir }) => {
-    const env = { AGENT_FOLD_DATA_DIR: dataDir };
+    const env = { HOMMIES_DATA_DIR: dataDir };
     assert.equal(await runHook(["--agent", "my-tool"], { hook_event_name: "PreToolUse", session_id: "m1", cwd: "/w/app",
       tool_name: "Edit", tool_input: { file_path: "/w/app/a.ts" } }, env), "");
     assert.equal(await runHook(["--agent", "my-tool"], { hook_event_name: "PermissionRequest", session_id: "m1",
@@ -71,7 +71,7 @@ test("agent-fold-hook reports a custom agent and never answers permissions", asy
 function runHook(args, payload, env) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [join(dist, "agent-hook.js"), ...args], {
-      env: { ...process.env, AGENT_FOLD_AGENT: "", ...env },
+      env: { ...process.env, HOMMIES_AGENT: "", AGENT_FOLD_AGENT: "", ...env },
     });
     let stdout = "";
     child.stdout.on("data", (chunk) => { stdout += chunk; });
@@ -86,11 +86,11 @@ async function pending(request) {
 }
 
 async function withServer(options, run) {
-  const dataDir = await mkdtemp(join(tmpdir(), "agent-fold-agents-test-"));
+  const dataDir = await mkdtemp(join(tmpdir(), "hommies-agents-test-"));
   const server = await startBridgeServer({ dataDir, port: 0, ...options });
   try {
     const connection = JSON.parse(await readFile(join(dataDir, "port.json"), "utf8"));
-    const headers = { "content-type": "application/json", "x-agent-fold-token": connection.token };
+    const headers = { "content-type": "application/json", "x-hommies-token": connection.token };
     const request = (method, path, body) => fetch(`http://127.0.0.1:${server.port}${path}`, {
       method, headers, ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });

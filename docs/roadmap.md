@@ -1,6 +1,6 @@
 # Roadmap: next features
 
-Today agent-fold only shows something when an agent needs you: a pending
+Today Hommies only shows something when an agent needs you: a pending
 permission, a question, or a turn that ended. The features below turn the bell
 into a live status view of every running agent. They are listed in priority
 order.
@@ -69,7 +69,7 @@ its latest steps.
 
 **Cost and risk:** `PreToolUse`/`PostToolUse` start one hook process per tool
 call. The hook must exit fast (short timeout, no stdout, never block) and skip
-the POST if `port.json` is missing. `agent-fold setup` should add these hooks
+the POST if `port.json` is missing. `hommies setup` should add these hooks
 with a short timeout, and the README must document them.
 
 ---
@@ -158,7 +158,7 @@ Custom agents use their own `/v1/agents/{name}/...` routes rather than a
 **Goal:** let any tool that can run a command hook show up in the bar without
 a dedicated adapter.
 
-- `agent-fold-hook --agent <name>` (or a new `agent` field in the payload)
+- `hommies-hook --agent <name>` (or a new `agent` field in the payload)
   tags events with an agent name.
 - Validate the name against `^[a-z0-9-]{1,24}$`. Reserve the built-in
   provider names (`claude`, `codex`, `opencode`, `omacode`) so a custom agent
@@ -175,20 +175,20 @@ a dedicated adapter.
 
 ## 6. Detect outdated hooks
 
-**Status: done.** `agent-fold setup --check`, `hooksOutdated` on
+**Status: done.** `hommies setup --check`, `hooksOutdated` on
 `/v1/pending`, and a reminder in the panel. The check compares only
-agent-fold's own entries, so the user's hook order never causes a false alarm.
+Hommies' own entries, so the user's hook order never causes a false alarm.
 
 **Goal:** tell the user when their installed hooks are older than what this
 version expects.
 
-- `agent-fold setup --check` (or a status line in `setup --dry-run`) compares
+- `hommies setup --check` (or a status line in `setup --dry-run`) compares
   each provider's config with what setup would write: missing events, a
   permission hook timeout lower than the bridge's wait (~305s), or a command
   path that no longer exists.
 - The bridge can run the same check at startup and expose a
   `hooksOutdated` flag on `/v1/pending`. The panel then shows
-  "Hooks are out of date — run `agent-fold setup`".
+  "Hooks are out of date — run `hommies setup`".
 
 ---
 

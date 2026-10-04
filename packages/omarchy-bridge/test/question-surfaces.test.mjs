@@ -103,13 +103,13 @@ test("top-bar mode blocks until every structured question is answered", async ()
 });
 
 async function withServer(run) {
-  const dataDir = await mkdtemp(join(tmpdir(), "agent-fold-question-test-"));
+  const dataDir = await mkdtemp(join(tmpdir(), "hommies-question-test-"));
   const server = await startBridgeServer({ dataDir, port: 0 });
   try {
     const connection = JSON.parse(await readFile(join(dataDir, "port.json"), "utf8"));
     const headers = {
       "content-type": "application/json",
-      "x-agent-fold-token": connection.token,
+      "x-hommies-token": connection.token,
     };
     const request = (method, path, body) => fetch(`http://127.0.0.1:${server.port}${path}`, {
       method,

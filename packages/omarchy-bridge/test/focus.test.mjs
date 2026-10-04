@@ -86,7 +86,7 @@ test("POST /v1/focus focuses the session's terminal with its process ancestry", 
 test("the compiled Claude hook sends the agent's process ancestry", async () => {
   const targets = [];
   await withServer({ focusWindow: async (target) => { targets.push(target); return true; } }, async ({ request, dataDir }) => {
-    await runHook("claude-hook.js", { hook_event_name: "SessionStart", session_id: "k1", cwd: "/w/app" }, { AGENT_FOLD_DATA_DIR: dataDir });
+    await runHook("claude-hook.js", { hook_event_name: "SessionStart", session_id: "k1", cwd: "/w/app" }, { HOMMIES_DATA_DIR: dataDir });
     assert.equal((await request("POST", "/v1/focus", { threadId: "k1" })).status, 200);
     // The hook's parent is this test process.
     assert.equal(targets[0].pids[0], process.pid);
@@ -109,11 +109,11 @@ async function pending(request) {
 }
 
 async function withServer(options, run) {
-  const dataDir = await mkdtemp(join(tmpdir(), "agent-fold-focus-test-"));
+  const dataDir = await mkdtemp(join(tmpdir(), "hommies-focus-test-"));
   const server = await startBridgeServer({ dataDir, port: 0, ...options });
   try {
     const connection = JSON.parse(await readFile(join(dataDir, "port.json"), "utf8"));
-    const headers = { "content-type": "application/json", "x-agent-fold-token": connection.token };
+    const headers = { "content-type": "application/json", "x-hommies-token": connection.token };
     const request = (method, path, body) => fetch(`http://127.0.0.1:${server.port}${path}`, {
       method, headers, ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });

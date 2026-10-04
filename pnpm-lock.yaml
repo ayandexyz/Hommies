@@ -15,7 +15,7 @@ importers:
   packages/omarchy-bridge:
     dependencies:
       effect:
-        specifier: ^3.10.0
+        specifier: 3.22.2
         version: 3.22.2
     devDependencies:
       '@types/node':
