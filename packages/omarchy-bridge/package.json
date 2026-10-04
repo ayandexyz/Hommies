@@ -1,6 +1,6 @@
 {
   "name": "@thisisayande/hommies",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Localhost HTTP bridge that exposes pending coding-agent questions and permissions to the agent-fold Omarchy plugin.",
   "license": "MIT",
   "author": "Ayan De",

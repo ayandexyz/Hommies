@@ -60,10 +60,10 @@ process.stdout.write("42\\n");
     notify({ key: "s1", title: "Claude · a", body: "Question: $(rm -rf ~)", urgency: "normal" });
     const calls = await waitForLines(log, 2);
     assert.deepEqual(calls[0], [
-      "--app-name=agent-fold", "--urgency=low", "--print-id", "--", "Claude · a", "Finished: &lt;b&gt;x&lt;/b&gt; &amp; y",
+      "--app-name=Hommies", "--urgency=low", "--print-id", "--", "Claude · a", "Finished: &lt;b&gt;x&lt;/b&gt; &amp; y",
     ]);
     assert.deepEqual(calls[1], [
-      "--app-name=agent-fold", "--urgency=normal", "--print-id", "--replace-id=42", "--", "Claude · a", "Question: $(rm -rf ~)",
+      "--app-name=Hommies", "--urgency=normal", "--print-id", "--replace-id=42", "--", "Claude · a", "Question: $(rm -rf ~)",
     ]);
   } finally {
     await rm(dir, { recursive: true, force: true });

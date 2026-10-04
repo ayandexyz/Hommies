@@ -25,7 +25,7 @@ export function createDesktopNotifier(command = "notify-send"): BridgeNotifier {
   return (notification) => {
     const previousSend = queues.get(notification.key) ?? Promise.resolve();
     const send = previousSend.then(() => new Promise<void>((resolve) => {
-      const args = ["--app-name=agent-fold", `--urgency=${notification.urgency}`, "--print-id"];
+      const args = ["--app-name=Hommies", `--urgency=${notification.urgency}`, "--print-id"];
       const previous = ids.get(notification.key);
       if (previous !== undefined) args.push(`--replace-id=${previous}`);
       // Servers that advertise body-markup parse the body as markup.

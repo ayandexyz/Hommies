@@ -1,4 +1,4 @@
-# agent-fold bell plugin
+# Hommies plugin
 
 The Omarchy plugin half of `agent-fold`. The other half — `@thisisayande/hommies` —
 runs the daemon this plugin talks to.
