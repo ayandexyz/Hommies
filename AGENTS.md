@@ -63,14 +63,21 @@ own; `pnpm -r build` is a no-op for it.
 
 1. `Service.qml` starts `hommies-bridge --data-dir <XDG_DATA_HOME>/hommies --port 0`
    on shell startup; on exit a 3 s timer restarts it. The daemon picks a free
-   port, generates a 32-byte token, and writes `{ port, token, version: 1 }`
-   to `<dataDir>/port.json` with mode `0o600`.
+   port, generates a 32-byte token and a 32-byte `serverKey`, writes
+   `{ port, token, version: 1, pid, serverKey }` to `<dataDir>/port.json`
+   with mode `0o600`, prints `hommies-bridge listening on 127.0.0.1:<port>`,
+   and removes `port.json` when it closes.
 2. `BarWidget.qml` watches that `port.json` via `FileView`; on change it
-   calls `bridge.js#configure({ port, token })` and starts polling
+   calls `bridge.js#configure({ port, token })`. `bridge.js` only uses it
+   while that port matches the one the running child announced
+   (`Service.qml` calls `Bridge.setLivePort`, and `setLivePort(0)` on exit),
+   so a stale `port.json` is never dialed. It polls
    `GET /v1/pending` every 3 s. `bridge.js` is a `.pragma library` (no
    `import`/`export`) and is loaded with `import "bridge.js" as Bridge`.
 3. Hook adapters discover the daemon by reading `port.json` directly
-   (`src/hook-common.ts#readConnection`). They honour
+   (`src/hook-common.ts#readConnection`) and post through
+   `postToBridge`, which verifies the port's owner uid before sending and the
+   `x-hommies-proof` HMAC before using a reply (`src/bridge-identity.ts`). They honour
    `HOMMIES_DATA_DIR` to override the default
    `$XDG_DATA_HOME/hommies` (falling back to `~/.local/share/hommies`).
 4. `POST /v1/preferences` syncs the two user settings

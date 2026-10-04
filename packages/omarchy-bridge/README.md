@@ -148,11 +148,34 @@ After installing `@thisisayande/hommies`, add this hook to `~/.claude/settings.j
 }
 ```
 
-The bridge writes its loopback port and a per-start bearer token to
-`$XDG_DATA_HOME/hommies/port.json` (or `~/.local/share/hommies/port.json`).
-The hook reads that file; no network request leaves the machine. Claude's hook
-payload and pending permissions stay in memory and are discarded when the
-bridge exits.
+The bridge writes its loopback port, a per-start bearer token, its pid, and a
+per-start `serverKey` to `$XDG_DATA_HOME/hommies/port.json` (or
+`~/.local/share/hommies/port.json`, mode `0600`), and removes the file when it
+stops. The hook reads that file; no network request leaves the machine.
+Claude's hook payload and pending permissions stay in memory and are discarded
+when the bridge exits.
+
+### Bridge identity (stale ports)
+
+A crash can leave `port.json` behind, and once the bridge has stopped its port
+is free for any local user to bind. So every hook and the OpenCode plugin
+check who they are talking to, and fail closed (no decision, the agent's own
+prompt) when they cannot tell:
+
+- After connecting and **before sending anything**, the hook looks up the
+  server end of its own connection in `/proc/net/tcp` and requires it to be
+  owned by the same uid. Another user's listener never sees the token or the
+  hook payload.
+- Each request carries a random `x-hommies-nonce`. The bridge answers with
+  `x-hommies-proof`, an HMAC-SHA256 keyed with `serverKey` over
+  `nonce + "\n" + status + "\n" + body`. `serverKey` is only ever in
+  `port.json`, never on the wire, so a hook only uses a decision whose proof
+  verifies. A forged or replayed permission grant is ignored.
+- A `port.json` without `serverKey` (a bridge older than 0.1.6) is treated as
+  no bridge.
+
+Requests without a nonce are still served unsigned, so older clients keep
+working.
 
 Claude questions retain all headers, options, descriptions, and multi-select
 metadata. In top-bar mode the hook waits for `/v1/respond`; in CLI mode it

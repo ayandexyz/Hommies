@@ -44,7 +44,7 @@ async function main(): Promise<void> {
     const sessionTitle = await readCodexSessionTitle(event.session_id);
     const body = JSON.stringify({ ...event, ...(sessionTitle === null ? {} : { session_title: sessionTitle }), ...await agentProcess() });
     const response = await postToBridge(connection, "/v1/providers/codex/permission", body, 5 * 60 * 1000 + 5_000);
-    if (response.ok) process.stdout.write(await response.text());
+    if (response.ok) process.stdout.write(response.text);
   } catch {
     // Keep the native approval prompt when the optional bridge is unavailable.
   }

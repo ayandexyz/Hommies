@@ -48,7 +48,7 @@ async function main(): Promise<void> {
       ? input
       : JSON.stringify({ ...event, ...(sessionTitle === null ? {} : { session_title: sessionTitle }), ...await agentProcess() });
     const response = await postToBridge(connection, path, body, 5 * 60 * 1000 + 5_000);
-    if (response.ok) process.stdout.write(await response.text());
+    if (response.ok) process.stdout.write(response.text);
   } catch {
     // The bridge is optional; preserve Claude Code's native permission prompt.
   }

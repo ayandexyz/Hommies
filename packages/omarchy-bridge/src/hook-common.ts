@@ -1,11 +1,29 @@
 /** Plumbing shared by the Claude and Codex command-hook adapters. */
+import { randomBytes } from "node:crypto";
 import { readFile } from "node:fs/promises";
+import { request as httpRequest } from "node:http";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
+import { connectToOwnBridge, nonceHeader, proofHeader, validProof } from "./bridge-identity.js";
 import { processFields, type ProcessFields } from "./process-tree.js";
 
-export interface BridgeConnection { readonly port: number; readonly token: string; }
+export interface BridgeConnection {
+  readonly port: number;
+  readonly token: string;
+  /** Verifies the bridge's responses; never sent. */
+  readonly serverKey: string;
+}
+
+/** A bridge response whose proof checked out. */
+export interface BridgeReply {
+  readonly ok: boolean;
+  readonly status: number;
+  readonly text: string;
+}
+
+/** Hook replies are a decision or an answer; anything bigger is not from the bridge. */
+const maxReplyBytes = 1024 * 1024;
 
 /** The agent (this hook's parent) and its ancestors, so the bar can focus its terminal. */
 export const agentProcess = (): Promise<ProcessFields> => processFields(process.ppid);
@@ -62,12 +80,19 @@ export function bridgeDataDirs(): string[] {
   return override ? [override] : [join(dataHome(), "hommies"), join(dataHome(), "agent-fold")];
 }
 
-/** The running bridge's port and token, or `null` when it is not running. */
+/**
+ * The running bridge's port, token, and server key, or `null` when it is not
+ * running. A `port.json` without a server key (a bridge older than 0.1.6) is
+ * treated as no bridge: its responses could not be verified.
+ */
 export async function readConnection(): Promise<BridgeConnection | null> {
   for (const dataDir of bridgeDataDirs()) {
     try {
       const connection = JSON.parse(await readFile(join(dataDir, "port.json"), "utf8")) as BridgeConnection;
-      if (Number.isInteger(connection.port) && typeof connection.token === "string") return connection;
+      if (Number.isInteger(connection.port) && connection.port > 0 && connection.port < 65536 &&
+        typeof connection.token === "string" && typeof connection.serverKey === "string" && connection.serverKey.length > 0) {
+        return connection;
+      }
     } catch {
       // Not running from this folder; try the next one.
     }
@@ -84,12 +109,50 @@ export async function readStdin(): Promise<string> {
   return input;
 }
 
-export function postToBridge(connection: BridgeConnection, path: string, body: string, timeoutMs: number): Promise<Response> {
-  return fetch(`http://127.0.0.1:${connection.port}${path}`, {
-    method: "POST",
-    headers: { "content-type": "application/json", ...tokenHeaders(connection.token) },
-    body,
-    signal: AbortSignal.timeout(timeoutMs),
+/**
+ * POSTs to the bridge, failing closed: the token and body are only written
+ * once the port is known to be held by this user, and the reply is only
+ * returned if it carries a valid proof for this request's nonce. Otherwise it
+ * rejects, and callers keep the agent's own prompt (see bridge-identity.ts).
+ */
+export async function postToBridge(connection: BridgeConnection, path: string, body: string, timeoutMs: number): Promise<BridgeReply> {
+  const nonce = randomBytes(24).toString("base64url");
+  const socket = await connectToOwnBridge(connection.port);
+  return new Promise((resolve, reject) => {
+    const request = httpRequest({
+      host: "127.0.0.1",
+      port: connection.port,
+      path,
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "content-length": Buffer.byteLength(body),
+        [nonceHeader]: nonce,
+        ...tokenHeaders(connection.token),
+      },
+      // The verified socket, not a pooled or fresh one.
+      createConnection: () => socket,
+    }, (response) => {
+      let text = "";
+      response.setEncoding("utf8");
+      response.on("data", (chunk: string) => {
+        text += chunk;
+        if (text.length > maxReplyBytes) request.destroy(new Error("bridge reply too large"));
+      });
+      response.on("end", () => {
+        const status = response.statusCode ?? 0;
+        if (!validProof(connection.serverKey, nonce, status, text, response.headers[proofHeader])) {
+          reject(new Error("bridge reply could not be verified"));
+          return;
+        }
+        resolve({ ok: status >= 200 && status < 300, status, text });
+      });
+      response.on("error", reject);
+    });
+    const timer = setTimeout(() => request.destroy(new Error("bridge request timed out")), timeoutMs);
+    request.on("close", () => clearTimeout(timer));
+    request.on("error", reject);
+    request.end(body);
   });
 }
 

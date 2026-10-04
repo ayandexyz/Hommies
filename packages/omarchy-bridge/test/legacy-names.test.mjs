@@ -46,6 +46,10 @@ test("hooks find the bridge in the hommies folder, then the agent-fold one", asy
     delete process.env.AGENT_FOLD_DATA_DIR;
     assert.equal(await readConnection(), null, "no bridge running");
 
+    await mkdir(join(dataHome, "agent-fold"), { recursive: true });
+    await writeFile(join(dataHome, "agent-fold", "port.json"), JSON.stringify({ port: 4444, token: "t", version: 1 }));
+    assert.equal(await readConnection(), null, "a port.json without a server key cannot be verified");
+
     await writeConnection(join(dataHome, "agent-fold"), 1111);
     assert.equal((await readConnection())?.port, 1111, "a bridge from before the rename");
 
@@ -79,7 +83,7 @@ test("setup names its backups <file>.hommies-backup-<time>", async () => {
 
 async function writeConnection(dir, port) {
   await mkdir(dir, { recursive: true });
-  await writeFile(join(dir, "port.json"), JSON.stringify({ port, token: "t", version: 1 }));
+  await writeFile(join(dir, "port.json"), JSON.stringify({ port, token: "t", version: 1, serverKey: "k" }));
 }
 
 function saveEnv(...names) {

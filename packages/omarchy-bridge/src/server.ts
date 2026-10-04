@@ -1,8 +1,9 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { mkdir, writeFile } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { basename, dirname, join } from "node:path";
 import { randomBytes, randomUUID } from "node:crypto";
 
+import { nonceHeader, proofHeader, responseProof, validNonce } from "./bridge-identity.js";
 import { ApprovalRequestId, ThreadId, type ProviderDriverKind } from "./localContracts.js";
 import type {
   ActivityHookInput,
@@ -61,6 +62,8 @@ type ClaudeHookDecision = {
 
 interface BridgeState {
   readonly token: string;
+  /** Signs responses (see bridge-identity.ts). Only in `port.json`; never sent or accepted over HTTP. */
+  readonly serverKey: string;
   readonly pending: Map<string, PendingPermission>;
   readonly questions: Map<string, PendingQuestion>;
   /** `attention` or `finished`, keyed by session id: only the latest turn end matters. */
@@ -170,6 +173,7 @@ export async function startBridgeServer(
   await mkdir(options.dataDir, { recursive: true });
   const state: BridgeState = {
     token: randomBytes(32).toString("base64url"),
+    serverKey: randomBytes(32).toString("base64url"),
     pending: new Map(),
     questions: new Map(),
     attention: new Map(),
@@ -225,10 +229,11 @@ export async function startBridgeServer(
   exitTimer.unref();
   const address = server.address();
   if (address === null || typeof address === "string") throw new Error("Hommies bridge did not receive a TCP address");
-  const connection = JSON.stringify({ port: address.port, token: state.token, version: 1 }, null, 2);
-  for (const dir of [options.dataDir, ...(options.legacyDataDirs ?? [])]) {
-    await mkdir(dir, { recursive: true });
-    await writeFile(join(dir, "port.json"), connection, { encoding: "utf8", mode: 0o600 });
+  const connection = JSON.stringify({ port: address.port, token: state.token, version: 1, pid: process.pid, serverKey: state.serverKey }, null, 2);
+  const portFiles = [options.dataDir, ...(options.legacyDataDirs ?? [])].map((dir) => join(dir, "port.json"));
+  for (const file of portFiles) {
+    await mkdir(dirname(file), { recursive: true });
+    await writeFile(file, connection, { encoding: "utf8", mode: 0o600 });
   }
   return {
     port: address.port,
@@ -250,13 +255,30 @@ export async function startBridgeServer(
       state.questions.clear();
       state.attention.clear();
       for (const stream of state.streams) stream.end();
+      // Clients must not keep dialing a port that is about to be free for anyone.
+      await Promise.all(portFiles.map((file) => removeOwnPortFile(file, state.token)));
       await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     },
   };
 }
 
+/** Removes `port.json` unless a newer bridge has already replaced it. */
+async function removeOwnPortFile(file: string, token: string): Promise<void> {
+  try {
+    const current = JSON.parse(await readFile(file, "utf8")) as { token?: unknown };
+    if (current.token === token) await unlink(file);
+  } catch {
+    // Already gone or unreadable: nothing of ours to remove.
+  }
+}
+
+/** Response signers by response, for requests that sent a nonce (see bridge-identity.ts). */
+const responseSigners = new WeakMap<ServerResponse, (status: number, body: string) => string>();
+
 async function handleRequest(request: IncomingMessage, response: ServerResponse, state: BridgeState): Promise<void> {
   const url = new URL(request.url ?? "/", "http://localhost");
+  const nonce = request.headers[nonceHeader];
+  if (validNonce(nonce)) responseSigners.set(response, (status, body) => responseProof(state.serverKey, nonce, status, body));
   try {
     if (request.method === "GET" && url.pathname === "/healthz") return sendJson(response, 200, { ok: true });
     if (!authorised(request, state)) return sendJson(response, 401, { error: "unauthorized" });
@@ -1038,8 +1060,13 @@ function openStream(response: ServerResponse, state: BridgeState): void {
 }
 
 function sendJson(response: ServerResponse, status: number, body: unknown): void {
-  response.writeHead(status, { "content-type": "application/json; charset=utf-8" });
-  response.end(JSON.stringify(body));
+  const text = JSON.stringify(body);
+  const sign = responseSigners.get(response);
+  response.writeHead(status, {
+    "content-type": "application/json; charset=utf-8",
+    ...(sign === undefined ? {} : { [proofHeader]: sign(status, text) }),
+  });
+  response.end(text);
 }
 
 async function readJson<T>(request: IncomingMessage): Promise<T> {

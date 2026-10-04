@@ -93,7 +93,7 @@ export const HommiesOpenCode = async (input: PluginInput) => {
     ownProcess ??= processFields(process.pid);
     const withProcess = body !== null && typeof body === "object" ? { ...body, ...await ownProcess } : body;
     const response = await postToBridge(connection, path, JSON.stringify(withProcess), timeoutMs);
-    return response.ok ? await response.json() as unknown : null;
+    return response.ok ? JSON.parse(response.text) as unknown : null;
   };
 
   const resume = (sessionId: string, event: "UserPromptSubmit" | "SessionEnd"): Promise<unknown> =>
