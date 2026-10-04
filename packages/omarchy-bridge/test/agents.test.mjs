@@ -32,7 +32,7 @@ test("custom agents get their own sessions, items, and labels", async () => {
     snapshot = await pending(request);
     assert.equal(snapshot.threads[0].title, "aider — app");
     assert.deepEqual(snapshot.threads[0].items.map((item) => [item.provider, item.kind]), [["aider", "attention"]]);
-    assert.equal(sent[0].title, "aider · app");
+    assert.equal(sent[0].title, "aider");
 
     await post("/failure", { error: "rate_limit" });
     assert.equal((await pending(request)).sessions[0].state, "ratelimit");

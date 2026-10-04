@@ -7,7 +7,7 @@ import test from "node:test";
 import { createDesktopNotifier, escapeMarkup } from "../dist/notifier.js";
 import { startBridgeServer } from "../dist/server.js";
 
-test("every new item sends one notification named after its session", async () => {
+test("every new item sends one notification naming only the agent and the item kind", async () => {
   const sent = [];
   await withServer({ notify: (notification) => sent.push(notification) }, async ({ request }) => {
     await request("POST", "/v1/providers/claude/stop", {
@@ -24,10 +24,37 @@ test("every new item sends one notification named after its session", async () =
     });
   });
   assert.deepEqual(sent, [
-    { key: "s1", title: "Claude · Stop hook detection", body: "Waiting for your reply: Should I commit?", urgency: "normal" },
-    { key: "s2", title: "Claude · other", body: "Finished: All tests pass.", urgency: "low" },
-    { key: "s3", title: "Claude · q", body: "Question: Which one?", urgency: "normal" },
+    { key: "s1", title: "Claude", body: "Waiting for your reply", urgency: "normal" },
+    { key: "s2", title: "Claude", body: "Finished", urgency: "low" },
+    { key: "s3", title: "Claude", body: "Question", urgency: "normal" },
   ]);
+});
+
+// notify-send arguments are readable by every local user through /proc/<pid>/cmdline.
+test("notifications never carry commands, paths, questions, session titles, or folders", async () => {
+  const sent = [];
+  const secrets = ["secret-repo", "Secret session", "cat /home/me/secret-repo/.env", "Delete the secret branch?"];
+  await withServer({ notify: (notification) => sent.push(notification) }, async ({ request }) => {
+    const permission = request("POST", "/v1/providers/claude/permission", {
+      hook_event_name: "PermissionRequest", session_id: "p1", cwd: "/home/me/secret-repo", session_title: "Secret session",
+      tool_name: "Bash", tool_input: { command: "cat /home/me/secret-repo/.env" },
+    });
+    await request("POST", "/v1/providers/claude/stop", {
+      hook_event_name: "Stop", session_id: "p2", cwd: "/home/me/secret-repo", session_title: "Secret session",
+      last_assistant_message: "Delete the secret branch?",
+    });
+    while (sent.length < 2) await new Promise((resolve) => setTimeout(resolve, 10));
+    const snapshot = await (await request("GET", "/v1/pending")).json();
+    const item = snapshot.threads.flatMap((thread) => thread.items).find((entry) => entry.kind === "permission");
+    await request("POST", "/v1/respond", { threadId: "p1", requestId: item.id, decision: "decline" });
+    await permission;
+  });
+  assert.equal(sent.length, 2);
+  for (const notification of sent) {
+    for (const secret of secrets) {
+      assert.ok(!notification.title.includes(secret) && !notification.body.includes(secret), `${secret} leaked into ${JSON.stringify(notification)}`);
+    }
+  }
 });
 
 test("notifications can be turned off through preferences", async () => {

@@ -360,9 +360,12 @@ commands run through `execFile` without a shell.
 
 `hommies-bridge` sends a desktop notification (via `notify-send`) for every
 new item: permission requests (critical urgency), questions and waiting replies
-(normal), and finished turns (low). The title names the session by the agent's
-session title or project folder, and a session's newer notification replaces its older
-one instead of stacking. Turn them off with the plugin's **Notify** toggle
+(normal), and finished turns (low). A notification names only the agent and
+the kind of item (for example "Claude" / "Permission needed"). It never
+includes the question, command, file path, session title, or project folder,
+because `notify-send` arguments are readable by other local users through
+`/proc/<pid>/cmdline`. Open the bar to see the details. A session's newer
+notification replaces its older one instead of stacking. Turn them off with the plugin's **Notify** toggle
 (`POST /v1/preferences` with `{"desktopNotifications": false}`), or start the
 bridge with `--no-notify`. Library callers opt in by passing
 `notify: createDesktopNotifier()` to `startBridgeServer`.

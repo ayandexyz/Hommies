@@ -127,7 +127,7 @@ test("a rate limit becomes a dismissable item and a ratelimit session state", as
     assert.equal((await pending(request)).totalCount, 0);
   }, { notify: (notification) => sent.push(notification) });
   assert.deepEqual(sent.map((notification) => [notification.body, notification.urgency]),
-    [["Rate limited: Rate limited \u2014 wait and retry: 429 Too Many Requests", "normal"]]);
+    [["Rate limited", "normal"]]);
 });
 
 test("other failures are errors, unknown ones still show, and the next prompt clears them", async () => {

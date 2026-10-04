@@ -137,8 +137,8 @@ test("turn ends become attention or finished items; subagents, placeholders, and
   }, { notify: (notification) => sent.push(notification) });
   // event() never awaits its handler, so the two idle POSTs race: compare without order.
   assert.deepEqual(sent.slice(0, 2).map((notification) => [notification.title, notification.urgency]).sort(), [
-    ["OpenCode · Wire up OpenCode", "normal"],
-    ["OpenCode · other", "low"],
+    ["OpenCode", "low"],
+    ["OpenCode", "normal"],
   ]);
 });
 

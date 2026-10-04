@@ -366,7 +366,7 @@ function setAttention(
     timer,
   });
   publish(state);
-  announce(state, item, cwd, sessionTitle);
+  announce(state, item);
 }
 
 /** What each failure means for the user, by Claude's `StopFailure` error name. */
@@ -565,7 +565,7 @@ async function receiveQuestion(
       answerSurface,
     };
     dropQuestion(state, String(id));
-    announce(state, item, input.cwd, input.session_title);
+    announce(state, item);
 
     if (answerSurface === "cli") {
       const timer = setTimeout(() => {
@@ -774,8 +774,14 @@ function soundFor(item: PendingItem): BridgeSound {
 /**
  * Plays a sound (when on) and sends one desktop notification per new item; a
  * session's newer notification replaces its older one.
+ *
+ * The notifier passes title and body to `notify-send` as process arguments,
+ * which other local users can read through `/proc/<pid>/cmdline`. So the
+ * notification only names the agent and the kind of item: never the summary
+ * (questions, commands, file paths), session title, or folder. The details
+ * stay behind the token-protected `/v1/pending`.
  */
-function announce(state: BridgeState, item: PendingItem | undefined, cwd: string | undefined, sessionTitle: string | undefined): void {
+function announce(state: BridgeState, item: PendingItem | undefined): void {
   if (!item) return;
   if (state.sounds && state.playSound) {
     try {
@@ -785,13 +791,11 @@ function announce(state: BridgeState, item: PendingItem | undefined, cwd: string
     }
   }
   if (!state.notify || !state.desktopNotifications) return;
-  const agent = labelsFor(providerOf(item)).agent;
-  const name = sessionTitle || (cwd ? basename(cwd) || cwd : undefined);
   try {
     state.notify({
       key: item.threadId,
-      title: name ? `${agent} · ${name}` : agent,
-      body: `${item.failure === undefined ? notificationHeadings[item.kind] : failureHeadings[item.failure]}: ${item.summary}`,
+      title: labelsFor(providerOf(item)).agent,
+      body: item.failure === undefined ? notificationHeadings[item.kind] : failureHeadings[item.failure],
       urgency: item.kind === "finished" ? "low" : item.kind === "permission" || item.failure === "error" ? "critical" : "normal",
     });
   } catch {
@@ -850,7 +854,7 @@ async function receivePermission(response: ServerResponse, input: ClaudePermissi
       resolve({ behavior: "unchanged" });
     });
     publish(state);
-    announce(state, item, input.cwd, input.session_title);
+    announce(state, item);
   });
   if (result.behavior === "unchanged") return sendJson(response, 200, {});
   const decision = {

@@ -58,7 +58,7 @@ test("Codex turn ends create Codex items, notifications, and clear on reply", as
     assert.equal((await pending(request)).totalCount, 0);
   });
   assert.deepEqual(sent, [{
-    key: "c1", title: "Codex · Codex parity", body: "Waiting for your reply: Want me to run the tests?", urgency: "normal",
+    key: "c1", title: "Codex", body: "Waiting for your reply", urgency: "normal",
   }]);
 });
 
