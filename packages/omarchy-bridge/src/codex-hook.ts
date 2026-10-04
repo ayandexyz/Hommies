@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/** Command-hook adapter for Codex permission requests, turn ends, and live activity. */
+/** Command-hook adapter for Codex permission requests, mirrored questions, turn ends, and live activity. */
 import {
   agentProcess, isActivityEvent, isTurnEvent, postToBridge, readConnection, readStdin, reportActivity, reportTurn, type ActivityHookEvent,
 } from "./hook-common.js";
@@ -12,6 +12,17 @@ async function main(): Promise<void> {
   try { event = JSON.parse(input) as ActivityHookEvent; } catch { return; }
   const connection = await readConnection();
   if (connection === null) return;
+  if (event.hook_event_name === "PreToolUse" && event.tool_name === "request_user_input") {
+    // Mirrored read-only: Codex's hooks cannot answer this tool, so never block or write to stdout.
+    try {
+      const sessionTitle = await readCodexSessionTitle(event.session_id);
+      const body = JSON.stringify({ ...event, ...(sessionTitle === null ? {} : { session_title: sessionTitle }), ...await agentProcess() });
+      await postToBridge(connection, "/v1/providers/codex/question", body, 2_000);
+    } catch {
+      // The bar is optional; Codex's own question UI still asks.
+    }
+    return;
+  }
   if (isActivityEvent(event)) {
     await reportActivity("/v1/providers/codex", event, connection);
     return;

@@ -389,9 +389,12 @@ detection (`Stop`), clearing on reply or session end (`UserPromptSubmit`,
 `SessionEnd`), session names from the `thread_name` in
 `$CODEX_HOME/session_index.jsonl`, [live activity](#live-activity) from
 `SessionStart` and `PreToolUse`, and desktop notifications. Codex's
-structured `request_user_input` tool is only offered in Plan mode and is not
-mirrored; in Default mode Codex asks in plain text, which the `Stop` detection
-covers.
+structured `request_user_input` tool (offered only in Plan mode) arrives
+through `PreToolUse` and is mirrored read-only in the bar whatever the answer
+surface preference, because Codex hooks cannot supply its answers: answer it
+in Codex. The mirror clears on the session's next tool call, `Stop`,
+`UserPromptSubmit`, or `SessionEnd`. In Default mode Codex asks in plain text,
+which the `Stop` detection covers.
 
 Add these entries to `~/.codex/hooks.json`, preserving any existing hook
 groups:

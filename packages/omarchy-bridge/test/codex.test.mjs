@@ -84,6 +84,29 @@ test("the compiled Codex hook reads the rollout and session index", async () => 
   });
 });
 
+test("the compiled Codex hook mirrors request_user_input read-only until Codex moves on", async () => {
+  await withServer({}, async ({ request, dataDir }) => {
+    const env = { HOMMIES_DATA_DIR: dataDir, CODEX_HOME: join(dataDir, "codex") };
+    const stdout = await runHook("codex-hook.js", { hook_event_name: "PreToolUse", session_id: "q1", cwd: "/w/app",
+      turn_id: "t", tool_name: "request_user_input", tool_use_id: "call_1", tool_input: { questions: [{
+        id: "moons", header: "Quiz", question: "Which planet has the most moons?", isOther: true,
+        options: [{ label: "Saturn", description: "Most confirmed moons." }, { label: "Jupiter", description: "Close." }],
+      }] } }, env);
+    assert.equal(stdout, "", "the hook never answers for Codex");
+    const item = (await pending(request)).threads[0]?.items[0];
+    assert.equal(item?.provider, "codex");
+    assert.equal(item?.kind, "question");
+    assert.equal(item?.answerSurface, "cli", "mirrored even when the preference is topbar");
+    assert.equal(item?.summary, "Which planet has the most moons?");
+    assert.deepEqual(item?.questions?.[0]?.options.map((option) => option.label), ["Saturn", "Jupiter"]);
+
+    await runHook("codex-hook.js", { hook_event_name: "PreToolUse", session_id: "q1", cwd: "/w/app",
+      tool_name: "exec_command", tool_use_id: "call_2", tool_input: { cmd: "ls" } }, env);
+    const snapshot = await pending(request);
+    assert.equal(snapshot.threads.flatMap((thread) => thread.items).filter((entry) => entry.kind === "question").length, 0);
+  });
+});
+
 test("the compiled Claude hook still reports turn ends after the refactor", async () => {
   await withServer({}, async ({ request, dataDir }) => {
     const transcript = join(dataDir, "claude.jsonl");

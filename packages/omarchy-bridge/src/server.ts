@@ -289,6 +289,9 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     if (request.method === "POST" && url.pathname === "/v1/providers/claude/question") {
       return await receiveQuestion(response, await readJson<ClaudeQuestionHookInput>(request), "claude", state);
     }
+    if (request.method === "POST" && url.pathname === "/v1/providers/codex/question") {
+      return await receiveCodexQuestion(response, await readJson<ClaudeQuestionHookInput>(request), state);
+    }
     if (request.method === "POST" && url.pathname === "/v1/providers/claude/question/resolved") {
       return resolveClaudeQuestion(response, await readJson<ClaudeQuestionHookInput>(request), state);
     }
@@ -334,6 +337,7 @@ function receiveStop(response: ServerResponse, input: ClaudeTurnHookInput, provi
   const question = detectReplyRequest(input.last_assistant_message);
   const kind = question === null ? "finished" : "attention";
   const summary = question ?? summarizeFinishedTurn(input.last_assistant_message);
+  if (provider === "codex") dropCodexQuestions(state, input.session_id);
   trackSession(state, provider, input.session_id, { process: input, cwd: input.cwd, sessionTitle: input.session_title, state: "idle" });
   setAttention(state, input.session_id, { provider, kind, summary }, input.cwd, input.session_title);
   return sendJson(response, 200, { ok: true, attention: kind === "attention" });
@@ -402,6 +406,7 @@ function receiveResume(response: ServerResponse, input: ClaudeTurnHookInput, pro
     throw new Error("invalid resume payload");
   }
   clearAttention(state, input.session_id);
+  if (provider === "codex") dropCodexQuestions(state, input.session_id);
   if (input.hook_event_name === "SessionEnd") dropSession(state, input.session_id);
   else {
     const prompt = typeof input.prompt === "string" ? oneLine(input.prompt, 80) : "";
@@ -427,6 +432,7 @@ function receiveActivity(response: ServerResponse, input: ActivityHookInput, pro
     case "PreToolUse":
       // A new tool call means the agent is no longer waiting on a turn-end reply.
       clearAttention(state, input.session_id);
+      if (provider === "codex") dropCodexQuestions(state, input.session_id);
       trackSession(state, provider, input.session_id, {
         process: input, cwd: input.cwd, sessionTitle: input.session_title, state: "working", step: describeStep(tool, toolInput),
       });
@@ -539,7 +545,13 @@ function clearAttention(state: BridgeState, sessionId: string): boolean {
  * Claude's AskUserQuestion (PreToolUse) and OpenCode's and Omacode's `question`
  * tools. Their questions arrive already converted to the AskUserQuestion shape.
  */
-async function receiveQuestion(response: ServerResponse, input: ClaudeQuestionHookInput, provider: Provider, state: BridgeState): Promise<void> {
+async function receiveQuestion(
+  response: ServerResponse,
+  input: ClaudeQuestionHookInput,
+  provider: Provider,
+  state: BridgeState,
+  answerSurface: QuestionAnswerSurface = state.questionAnswerSurface,
+): Promise<void> {
   if (input.hook_event_name === "PreToolUse" && input.tool_name === "AskUserQuestion") {
     // A new tool call means the agent is working again in this session.
     clearAttention(state, input.session_id);
@@ -550,12 +562,12 @@ async function receiveQuestion(response: ServerResponse, input: ClaudeQuestionHo
       id, threadId: ThreadId(input.session_id), provider, kind: "question",
       summary: questions[0]?.question ?? `${labelsFor(provider).agent} needs your input`,
       createdAt: new Date().toISOString(), questions,
-      answerSurface: state.questionAnswerSurface,
+      answerSurface,
     };
     dropQuestion(state, String(id));
     announce(state, item, input.cwd, input.session_title);
 
-    if (state.questionAnswerSurface === "cli") {
+    if (answerSurface === "cli") {
       const timer = setTimeout(() => {
         state.questions.delete(String(id));
         publish(state);
@@ -583,6 +595,35 @@ async function receiveQuestion(response: ServerResponse, input: ClaudeQuestionHo
     if (hasRequestIds(provider)) return sendJson(response, 200, { answers: openCodeAnswers(questions, answers) });
     return sendJson(response, 200, { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "allow", updatedInput: { ...input.tool_input, answers } } });
   } else throw new Error("invalid Claude question hook payload");
+}
+
+/**
+ * Codex's `request_user_input` (PreToolUse). Codex hooks cannot supply its
+ * answers, so the bar always mirrors it read-only and Codex's own UI answers.
+ */
+async function receiveCodexQuestion(response: ServerResponse, input: ClaudeQuestionHookInput, state: BridgeState): Promise<void> {
+  if (
+    !input || input.hook_event_name !== "PreToolUse" || input.tool_name !== "request_user_input" ||
+    typeof input.session_id !== "string" || typeof input.tool_use_id !== "string" ||
+    input.tool_input === null || typeof input.tool_input !== "object"
+  ) {
+    throw new Error("invalid Codex question hook payload");
+  }
+  dropCodexQuestions(state, input.session_id);
+  return receiveQuestion(response, { ...input, tool_name: "AskUserQuestion" }, "codex", state, "cli");
+}
+
+/**
+ * Codex sends no hook when its question is answered; its next tool call, turn
+ * end, or prompt in that session means it was.
+ */
+function dropCodexQuestions(state: BridgeState, sessionId: string): boolean {
+  let dropped = false;
+  for (const [id, question] of state.questions) {
+    if (question.provider !== "codex" || String(question.item.threadId) !== sessionId) continue;
+    dropped = dropQuestion(state, id) || dropped;
+  }
+  return dropped;
 }
 
 /** Removes a question and releases a hook still waiting on it. */
