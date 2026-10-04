@@ -365,6 +365,13 @@ export async function checkHooks(
   return checks;
 }
 
+/** Providers with Hommies hooks in their config, whether current or outdated. */
+export async function connectedHookProviders(environment: SetupEnvironment = defaultSetupEnvironment()): Promise<SetupProvider[]> {
+  return (await checkHooks(environment))
+    .filter((check) => check.status === "current" || check.status === "outdated")
+    .map((check) => check.provider);
+}
+
 /** Providers whose Hommies hooks exist but differ from what setup would write. */
 export async function outdatedHookProviders(environment: SetupEnvironment = defaultSetupEnvironment()): Promise<SetupProvider[]> {
   return (await checkHooks(environment)).filter((check) => check.status === "outdated").map((check) => check.provider);

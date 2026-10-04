@@ -73,6 +73,8 @@ interface BridgeState {
   readonly focusWindow: FocusWindow;
   readonly agentProcesses: AgentProcessProbe;
   hooksOutdated: ReadonlyArray<string>;
+  /** `null` until checked, or when the bridge was started without `connectedAgents`. */
+  hooksConnected: ReadonlyArray<string> | null;
   questionAnswerSurface: QuestionAnswerSurface;
   desktopNotifications: boolean;
   sounds: boolean;
@@ -178,6 +180,7 @@ export async function startBridgeServer(
     focusWindow: options.focusWindow ?? focusHyprlandWindow,
     agentProcesses: options.agentProcesses ?? procAgentProbe,
     hooksOutdated: [],
+    hooksConnected: null,
     questionAnswerSurface: "topbar",
     desktopNotifications: true,
     sounds: false,
@@ -187,20 +190,31 @@ export async function startBridgeServer(
     server.once("error", reject);
     server.listen(options.port, host, () => { server.off("error", reject); resolve(); });
   });
-  const checkHooks = options.checkHooks;
+  const { checkHooks, connectedAgents } = options;
   const refreshHooks = async (): Promise<void> => {
-    if (!checkHooks) return;
+    let changed = false;
     try {
-      const outdated = [...await checkHooks()].sort();
-      if (JSON.stringify(outdated) === JSON.stringify(state.hooksOutdated)) return;
-      state.hooksOutdated = outdated;
-      publish(state);
+      const outdated = checkHooks ? [...await checkHooks()].sort() : state.hooksOutdated;
+      if (JSON.stringify(outdated) !== JSON.stringify(state.hooksOutdated)) {
+        state.hooksOutdated = outdated;
+        changed = true;
+      }
     } catch {
       // A failed check is not a reason to warn; keep the last result.
     }
+    try {
+      const connected = connectedAgents ? [...await connectedAgents()].sort() : null;
+      if (JSON.stringify(connected) !== JSON.stringify(state.hooksConnected)) {
+        state.hooksConnected = connected;
+        changed = true;
+      }
+    } catch {
+      // Keep the last result.
+    }
+    if (changed) publish(state);
   };
   await refreshHooks();
-  const hookTimer = checkHooks ? setInterval(() => { void refreshHooks(); }, hookCheckIntervalMs) : undefined;
+  const hookTimer = checkHooks || connectedAgents ? setInterval(() => { void refreshHooks(); }, hookCheckIntervalMs) : undefined;
   hookTimer?.unref();
   let checkingExits = false;
   const exitTimer = setInterval(() => {
@@ -882,6 +896,7 @@ function snapshot(state: BridgeState): PendingResponse {
     threads: [...threads.values()],
     sessions: sessionsSnapshot(state),
     ...(state.hooksOutdated.length > 0 ? { hooksOutdated: state.hooksOutdated } : {}),
+    ...(state.hooksConnected === null ? {} : { hooksConnected: state.hooksConnected }),
   };
 }
 

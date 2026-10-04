@@ -5,7 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { startBridgeServer } from "../dist/server.js";
-import { checkHooks, commandHookFingerprint, outdatedHookProviders, runSetup } from "../dist/setup.js";
+import { checkHooks, commandHookFingerprint, connectedHookProviders, outdatedHookProviders, runSetup } from "../dist/setup.js";
 
 const install = { uninstall: false, dryRun: false, providers: ["claude", "codex", "opencode"] };
 
@@ -70,6 +70,46 @@ test("the bridge publishes outdated hooks only when there are some", async () =>
     }
   } finally {
     await server.close();
+    await rm(dataDir, { recursive: true, force: true });
+  }
+});
+
+test("connected agents are the ones with Hommies hooks, current or outdated", async () => {
+  await withHome(async ({ home, environment }) => {
+    await mkdir(join(home, ".claude"));
+    await mkdir(join(home, ".codex"));
+    await mkdir(join(home, ".config", "opencode"), { recursive: true });
+    assert.deepEqual(await connectedHookProviders(environment), [], "installed but not set up");
+
+    await runSetup({ ...install, providers: ["claude", "opencode"] }, environment);
+    assert.deepEqual(await connectedHookProviders(environment), ["claude", "opencode"]);
+
+    await writeFile(join(home, ".claude", "settings.json"), JSON.stringify({ hooks: { Stop: [{ hooks: [
+      { type: "command", command: "node /old/agent-fold/dist/claude-hook.js" },
+    ] }] } }));
+    assert.deepEqual(await connectedHookProviders(environment), ["claude", "opencode"], "outdated hooks still connect");
+  });
+});
+
+test("the bridge publishes the connected agents", async () => {
+  let connected = ["opencode", "claude"];
+  const dataDir = await mkdtemp(join(tmpdir(), "hommies-connected-bridge-"));
+  const server = await startBridgeServer({ dataDir, port: 0, connectedAgents: async () => connected });
+  try {
+    const { token } = JSON.parse(await readFile(join(dataDir, "port.json"), "utf8"));
+    const pending = async () => (await fetch(`http://127.0.0.1:${server.port}/v1/pending`, { headers: { "x-hommies-token": token } })).json();
+    assert.deepEqual((await pending()).hooksConnected, ["claude", "opencode"]);
+  } finally {
+    await server.close();
+    await rm(dataDir, { recursive: true, force: true });
+  }
+  const bare = await startBridgeServer({ dataDir, port: 0 });
+  try {
+    const { token } = JSON.parse(await readFile(join(dataDir, "port.json"), "utf8"));
+    const snapshot = await (await fetch(`http://127.0.0.1:${bare.port}/v1/pending`, { headers: { "x-hommies-token": token } })).json();
+    assert.equal("hooksConnected" in snapshot, false, "absent when the bridge was not asked to check");
+  } finally {
+    await bare.close();
     await rm(dataDir, { recursive: true, force: true });
   }
 });

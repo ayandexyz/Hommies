@@ -35,6 +35,12 @@ export interface BridgeServerOptions {
    * and every minute; `runtime.ts` passes `outdatedHookProviders`.
    */
   readonly checkHooks?: () => Promise<ReadonlyArray<string>>;
+  /**
+   * Returns the agents that have Hommies hooks (current or outdated), so the
+   * panel can show tabs only for agents in use. Run with `checkHooks`;
+   * `runtime.ts` passes `connectedHookProviders`.
+   */
+  readonly connectedAgents?: () => Promise<ReadonlyArray<string>>;
   /** Plays a sound for each new item while the `sounds` preference is on. `runtime.ts` passes `createSoundPlayer()`. */
   readonly playSound?: BridgeSoundPlayer;
   /**
@@ -140,6 +146,8 @@ export interface PendingResponse {
   readonly sessions?: ReadonlyArray<SessionActivity>;
   /** Agents whose hooks differ from what `hommies setup` writes. Absent when none are. */
   readonly hooksOutdated?: ReadonlyArray<string>;
+  /** Agents with Hommies hooks in their config. Absent when the bridge does not check. */
+  readonly hooksConnected?: ReadonlyArray<string>;
 }
 
 /**

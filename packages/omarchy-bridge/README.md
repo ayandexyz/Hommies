@@ -74,6 +74,11 @@ agents in `hooksOutdated` on `/v1/pending`; the panel then shows a reminder to
 re-run setup. Hooks you trimmed on purpose (for example, the activity hooks)
 also count as out of date.
 
+The same check lists every agent that has Hommies hooks, current or out of
+date, in `hooksConnected`. The panel shows a tab only for those agents and for
+any agent that has reported a session or item (Omacode, which needs no setup,
+and custom agents). Until one qualifies, it shows all four built-in tabs.
+
 To remove everything setup added:
 
 ```sh
