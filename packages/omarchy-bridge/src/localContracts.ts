@@ -1,12 +1,8 @@
 /**
- * Local provider contract types shared across the bridge.
+ * Branded ID types and provider kinds shared across the bridge.
  *
- * These structural types match the hook payloads and projection shapes we
- * currently consume. Keep them declared exactly once — duplication across
- * the codebase is what bit us when the contract drifted in v0.1.
- *
- * Promote them to a published npm package only when another consumer needs
- * them; until then this file is the single source of truth.
+ * Keep these branded types here exactly once — duplication across the
+ * codebase is what bit us when the contract drifted in v0.1.
  */
 
 declare const ApprovalRequestIdBrand: unique symbol;

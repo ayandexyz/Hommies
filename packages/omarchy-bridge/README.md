@@ -3,8 +3,8 @@
 Localhost HTTP bridge that surfaces pending coding-agent questions and permissions
 to the Hommies Omarchy plugin.
 
-This package runs the projection pipeline and provider adapters itself. It is *not* a
-client of a separately running agent server; it is the server.
+It is a self-contained server: the agent hooks, the OpenCode plugin, and the Omarchy
+plugin all talk to it over loopback HTTP.
 
 ## API
 

@@ -4,25 +4,30 @@
 
 pnpm workspace monorepo with two packages.
 
-- `packages/omarchy-bridge/` — TypeScript. Provides the Effect-based projection pipeline
-  and provider adapters that surface pending questions and permissions, and exposes a
-  localhost HTTP surface for the QML plugin. Published to npm as `@agent-fold/bridge`.
-- `packages/bell-plugin/` — Omarchy plugin. QML + JS + `manifest.json`. Distributed as a
-  folder consumable by `omarchy plugin add`. Depends on `@agent-fold/bridge` at runtime via
-  the npm-installed copy, not via local workspace link — the bridge runs as a Node child
-  process owned by the `service`-kind plugin.
+- `packages/omarchy-bridge/` — `@thisisayande/hommies` (npm). TypeScript + Effect.
+  A localhost HTTP daemon (`startBridgeServer` in `src/server.ts`) plus four
+  provider adapters that feed it:
+  - Claude Code: blocking command hooks (`src/claude-hook.ts`, bin `hommies-claude-hook`).
+  - Codex: blocking command hooks (`src/codex-hook.ts`, bin `hommies-codex-hook`).
+  - OpenCode: in-process plugin (`src/opencode-plugin.ts`, export `AgentFoldOpenCode`).
+  - Omacode: built-in to the agent itself; Omacode talks to the same endpoints as OpenCode.
+  Shared branded ID types and provider kinds live in `src/localContracts.ts`.
+- `packages/bell-plugin/` — Omarchy plugin distributed as a folder consumed by
+  `omarchy plugin add`. QML (`BarWidget.qml` entry, `Panel.qml` loaded via
+  `Loader`, `Service.qml` daemon supervisor, `ProviderLogo.qml` shared
+  component) plus `bridge.js` (the only thing that talks to the bridge) and
+  `manifest.json` declaring `kinds: ["bar-widget", "service"]`.
 
 ## Hard constraints
 
-- **Vendor only what the bridge needs.** The bridge is self-contained: provider hooks, an
-  Effect-based projection layer, and the localhost HTTP surface all live in this repo.
-  If you need to lift something out, do it as a generic npm package and consume it here
-  rather than the other way around.
-- **The QML plugin runs inside the Omarchy Quickshell process.** It is unsandboxed and
-  inherits the user's permissions. Never run a second Quickshell process for this plugin.
-  Never execute downloaded code without review.
-- **No telemetry, no analytics, no auto-update pings.** The bridge is local-only; it binds
-  to `127.0.0.1` and exits when the shell exits.
+- **The QML plugin runs inside the Omarchy Quickshell process.** Unsandboxed,
+  inherits the user's permissions. Never spawn a second Quickshell. Never
+  execute downloaded code without review.
+- **No telemetry, no analytics, no auto-update pings.** The bridge is
+  local-only; `server.ts` rejects any host that is not `127.0.0.1` or `::1`
+  and exits when the shell exits. All HTTP routes (except `OPTIONS` and
+  `GET /healthz`) require the `x-hommies-token` header whose value is
+  written to `port.json` by `startBridgeServer`.
 
 ## Local development
 
