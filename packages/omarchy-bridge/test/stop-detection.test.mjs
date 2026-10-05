@@ -5,7 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { startBridgeServer } from "../dist/server.js";
-import { detectReplyRequest, lastAssistantText } from "../dist/stop-detection.js";
+import { detectReplyRequest, finalMessage, lastAssistantText, maxMessageLength } from "../dist/stop-detection.js";
 import { sessionTitle } from "../dist/transcript.js";
 
 test("closing questions and decision requests are detected", () => {
@@ -130,9 +130,46 @@ async function pending(request) {
   return request("GET", "/v1/pending").then((response) => response.json());
 }
 
-async function withServer(run) {
+test("finalMessage keeps the full text only when it adds to the summary", () => {
+  assert.equal(finalMessage("All done.", "All done."), null);
+  assert.equal(finalMessage("  \n ", ""), null);
+  assert.equal(finalMessage("All done.\r\n\r\n- fixed a\r\n- fixed b\n", "All done."), "All done.\n\n- fixed a\n- fixed b");
+
+  const long = Array.from({ length: 400 }, (_, index) => `line ${index} ${"x".repeat(20)}`).join("\n");
+  const cut = finalMessage(long, "line 0");
+  assert.ok(cut.length <= maxMessageLength);
+  assert.ok(cut.endsWith("\n\u2026"), "a cut message says so");
+  assert.ok(long.startsWith(cut.slice(0, -2)), "cut at a line break, not mid-line");
+});
+
+test("turn-end items carry the full final message, but notifications do not", async () => {
+  const sent = [];
+  await withServer(async ({ request }) => {
+    const report = "Fixed the build.\n\n## Changes\n\n- `server.ts`: handle **empty** input\n- added a test";
+    await request("POST", "/v1/providers/claude/stop", { hook_event_name: "Stop", session_id: "m1", last_assistant_message: report });
+    let item = (await pending(request)).threads[0].items[0];
+    assert.equal(item.kind, "finished");
+    assert.equal(item.summary, "Fixed the build.");
+    assert.equal(item.message, report);
+
+    const question = "I looked at both options.\n\nShould I use the faster one?";
+    await request("POST", "/v1/providers/codex/stop", { hook_event_name: "Stop", session_id: "m2", last_assistant_message: question });
+    item = (await pending(request)).threads.find((thread) => thread.threadId === "m2").items[0];
+    assert.equal(item.kind, "attention");
+    assert.equal(item.message, question);
+
+    await request("POST", "/v1/providers/claude/stop", { hook_event_name: "Stop", session_id: "m3", last_assistant_message: "Done." });
+    item = (await pending(request)).threads.find((thread) => thread.threadId === "m3").items[0];
+    assert.equal(item.message, undefined, "no message when the summary already says it all");
+
+    assert.ok(sent.length >= 3);
+    assert.ok(!JSON.stringify(sent).includes("server.ts"), "the message never reaches notify-send");
+  }, { notify: (notification) => sent.push(notification) });
+});
+
+async function withServer(run, options = {}) {
   const dataDir = await mkdtemp(join(tmpdir(), "hommies-stop-test-"));
-  const server = await startBridgeServer({ dataDir, port: 0 });
+  const server = await startBridgeServer({ dataDir, port: 0, ...options });
   try {
     const connection = JSON.parse(await readFile(join(dataDir, "port.json"), "utf8"));
     const headers = { "content-type": "application/json", "x-hommies-token": connection.token };

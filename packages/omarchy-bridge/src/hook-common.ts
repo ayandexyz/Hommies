@@ -6,6 +6,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { connectToOwnBridge, nonceHeader, proofHeader, validProof } from "./bridge-identity.js";
+import { editStats } from "./edit-stats.js";
 import { processFields, type ProcessFields } from "./process-tree.js";
 
 export interface BridgeConnection {
@@ -50,6 +51,9 @@ export interface FailureHookEvent extends TurnHookEvent {
 export interface ActivityHookEvent extends TurnHookEvent {
   readonly tool_name?: string;
   readonly tool_input?: unknown;
+  /** Sent on SubagentStart and SubagentStop. */
+  readonly agent_id?: string;
+  readonly agent_type?: string;
 }
 
 export function isTurnEvent(name: string | undefined): boolean {
@@ -62,6 +66,8 @@ export function isTurnEvent(name: string | undefined): boolean {
  */
 export function isActivityEvent(event: ActivityHookEvent): boolean {
   if (event.hook_event_name === "SessionStart") return true;
+  // Observational: they never block, so they must not reach the permission path.
+  if (event.hook_event_name === "SubagentStart" || event.hook_event_name === "SubagentStop") return true;
   return (event.hook_event_name === "PreToolUse" || event.hook_event_name === "PostToolUseFailure") &&
     event.tool_name !== "AskUserQuestion";
 }
@@ -240,11 +246,18 @@ export async function reportActivity(
     const value = input[field];
     if (typeof value === "string") toolInput[field] = value.slice(0, 300);
   }
+  // Only the line counts are sent; the edited text stays in this process.
+  const edit = event.hook_event_name === "PreToolUse" && typeof event.tool_name === "string"
+    ? await editStats(event.tool_name, event.tool_input, event.cwd).catch(() => null)
+    : null;
   const body = {
     hook_event_name: event.hook_event_name,
     session_id: event.session_id,
     cwd: event.cwd,
     ...(typeof event.tool_name === "string" ? { tool_name: event.tool_name, tool_input: toolInput } : {}),
+    ...(edit === null ? {} : { edit }),
+    ...(typeof event.agent_id === "string" ? { agent_id: event.agent_id.slice(0, 200) } : {}),
+    ...(typeof event.agent_type === "string" ? { agent_type: event.agent_type.slice(0, 100) } : {}),
     ...await agentProcess(),
   };
   try {

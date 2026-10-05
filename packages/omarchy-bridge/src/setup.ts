@@ -1,6 +1,7 @@
 /**
  * Registers (or removes) the Hommies hooks in each agent's own config:
- * Claude Code `settings.json`, Codex `hooks.json`, and OpenCode `opencode.json`.
+ * Claude Code `settings.json`, Codex `hooks.json`, OpenCode `opencode.json`,
+ * Gemini CLI `settings.json`, Antigravity `hooks.json`, and a Grok Build hook file.
  *
  * Merges never drop the user's other hooks or plugins. An entry belongs to
  * Hommies when its command runs one of our hook files, so re-running setup
@@ -13,8 +14,8 @@ import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-export type SetupProvider = "claude" | "codex" | "opencode";
-export const SETUP_PROVIDERS: ReadonlyArray<SetupProvider> = ["claude", "codex", "opencode"];
+export type SetupProvider = "claude" | "codex" | "opencode" | "gemini" | "antigravity" | "grok";
+export const SETUP_PROVIDERS: ReadonlyArray<SetupProvider> = ["claude", "codex", "opencode", "gemini", "antigravity", "grok"];
 
 type JsonObject = { [key: string]: unknown };
 
@@ -39,6 +40,8 @@ const CLAUDE_HOOKS: ReadonlyArray<HookSpec> = [
   { event: "StopFailure", timeout: 5 },
   { event: "UserPromptSubmit", timeout: 5 },
   { event: "SessionEnd", timeout: 5 },
+  { event: "SubagentStart", timeout: 5 },
+  { event: "SubagentStop", timeout: 5 },
 ];
 
 /** Codex has no StopFailure hook, so its failed turns are not reported. */
@@ -50,6 +53,33 @@ const CODEX_HOOKS: ReadonlyArray<HookSpec> = [
   { event: "UserPromptSubmit", timeout: 5 },
   { event: "SessionEnd", timeout: 5 },
 ];
+
+/**
+ * Gemini CLI timeouts are in milliseconds. `AfterTool` and the model events
+ * are left out: one step per tool call is enough, and `AfterModel` fires on
+ * every streamed chunk.
+ */
+const GEMINI_HOOKS: ReadonlyArray<HookSpec> = [
+  { event: "SessionStart", timeout: 5000 },
+  { event: "BeforeTool", matcher: "*", timeout: 5000 },
+  { event: "BeforeAgent", timeout: 5000 },
+  { event: "AfterAgent", timeout: 5000 },
+  { event: "SessionEnd", timeout: 5000 },
+];
+
+/** Grok Build uses Claude's event names; a missing matcher matches every tool. */
+const GROK_HOOKS: ReadonlyArray<HookSpec> = [
+  { event: "SessionStart", timeout: 5 },
+  { event: "UserPromptSubmit", timeout: 5 },
+  { event: "PreToolUse", timeout: 5 },
+  { event: "PostToolUseFailure", timeout: 5 },
+  { event: "Stop", timeout: 5 },
+  { event: "StopFailure", timeout: 5 },
+  { event: "SessionEnd", timeout: 5 },
+];
+
+/** The key our entry lives under in Antigravity's `hooks.json`, which is keyed by hook name. */
+const ANTIGRAVITY_HOOK_NAME = "hommies";
 
 const isObject = (value: unknown): value is JsonObject =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -65,6 +95,16 @@ const shellQuote = (value: string): string =>
 export const hookCommand = (hookPath: string): string => {
   const path = shellQuote(hookPath);
   return `test -f ${path} && node ${path} || true`;
+};
+
+/**
+ * For agents that read a JSON object from every hook's stdout (Gemini CLI,
+ * Antigravity): the hook prints `{}` itself, and a removed package prints it here.
+ */
+export const jsonHookCommand = (hookPath: string, ...args: string[]): string => {
+  const path = shellQuote(hookPath);
+  const rest = args.map((arg) => ` ${shellQuote(arg)}`).join("");
+  return `test -f ${path} && node ${path}${rest} || echo '{}'`;
 };
 
 /** Install paths that belong to us: the current package, its old name, and a source checkout. */
@@ -160,6 +200,37 @@ export const mergeClaudeSettings = (config: JsonObject, command: string | null):
 export const mergeCodexHooks = (config: JsonObject, command: string | null): JsonObject =>
   mergeCommandHooks(config, CODEX_HOOKS, "codex-hook.js", command);
 
+export const mergeGeminiSettings = (config: JsonObject, command: string | null): JsonObject =>
+  mergeCommandHooks(config, GEMINI_HOOKS, "gemini-hook.js", command);
+
+export const mergeGrokHooks = (config: JsonObject, command: string | null): JsonObject =>
+  mergeCommandHooks(config, GROK_HOOKS, "grok-hook.js", command);
+
+/**
+ * Antigravity's `hooks.json` maps hook names to their events. We own the
+ * `hommies` entry: it is replaced on install and removed on uninstall, and
+ * the user's other entries are kept. Antigravity sends no event name, so each
+ * command passes it as an argument. `PreToolUse` is not hooked: it must
+ * answer with a permission decision.
+ */
+export function mergeAntigravityHooks(config: JsonObject, hookPath: string | null): JsonObject {
+  if (hookPath === null && !(ANTIGRAVITY_HOOK_NAME in config)) return config;
+  const next: JsonObject = { ...config };
+  delete next[ANTIGRAVITY_HOOK_NAME];
+  if (hookPath !== null) {
+    const handler = (event: string): JsonObject => ({ type: "command", command: jsonHookCommand(hookPath, event), timeout: 5 });
+    next[ANTIGRAVITY_HOOK_NAME] = {
+      enabled: true,
+      PostToolUse: [{ matcher: "*", hooks: [handler("PostToolUse")] }],
+      Stop: [handler("Stop")],
+    };
+  }
+  return next;
+}
+
+export const antigravityFingerprint = (config: JsonObject): string[] =>
+  ANTIGRAVITY_HOOK_NAME in config ? [JSON.stringify(config[ANTIGRAVITY_HOOK_NAME])] : [];
+
 /** Returns a copy of an OpenCode config with our plugin entry replaced (or removed when `pluginUrl` is null). */
 export function mergeOpenCodeConfig(config: JsonObject, pluginUrl: string | null): JsonObject {
   const next: JsonObject = { ...config };
@@ -214,6 +285,9 @@ function targets(environment: SetupEnvironment): ReadonlyArray<ProviderTarget> {
   const claudeDir = env.CLAUDE_CONFIG_DIR || join(home, ".claude");
   const codexDir = env.CODEX_HOME || join(home, ".codex");
   const openCodeDir = join(env.XDG_CONFIG_HOME || join(home, ".config"), "opencode");
+  const geminiDir = join(home, ".gemini");
+  const antigravityDir = join(geminiDir, "config");
+  const grokDir = join(home, ".grok");
   return [
     {
       provider: "claude",
@@ -237,6 +311,28 @@ function targets(environment: SetupEnvironment): ReadonlyArray<ProviderTarget> {
       merge: (config, install) =>
         mergeOpenCodeConfig(config, install ? pathToFileURL(join(distDir, "opencode-plugin.js")).href : null),
       fingerprint: openCodeFingerprint,
+    },
+    {
+      provider: "gemini",
+      configDir: geminiDir,
+      file: join(geminiDir, "settings.json"),
+      merge: (config, install) => mergeGeminiSettings(config, install ? jsonHookCommand(join(distDir, "gemini-hook.js")) : null),
+      fingerprint: (config) => commandHookFingerprint(config, "gemini-hook.js"),
+    },
+    {
+      provider: "antigravity",
+      configDir: antigravityDir,
+      file: join(antigravityDir, "hooks.json"),
+      merge: (config, install) => mergeAntigravityHooks(config, install ? join(distDir, "antigravity-hook.js") : null),
+      fingerprint: antigravityFingerprint,
+    },
+    {
+      // A hook file of our own, so the user's other Grok hook files are never touched.
+      provider: "grok",
+      configDir: grokDir,
+      file: join(grokDir, "hooks", "hommies.json"),
+      merge: (config, install) => mergeGrokHooks(config, install ? hookCommand(join(distDir, "grok-hook.js")) : null),
+      fingerprint: (config) => commandHookFingerprint(config, "grok-hook.js"),
     },
   ];
 }

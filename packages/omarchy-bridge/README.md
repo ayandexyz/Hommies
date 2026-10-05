@@ -38,7 +38,8 @@ versioned path (`/v2/...`).
 
 Install the package, then let `hommies setup` (the alias from before the rename,
 `agent-fold setup`, also works) register the hooks for the agents it finds (Claude Code in `~/.claude`, Codex in `~/.codex`, OpenCode in
-`~/.config/opencode`):
+`~/.config/opencode`, Gemini CLI in `~/.gemini`, Antigravity in `~/.gemini/config`,
+Grok Build in `~/.grok`):
 
 ```sh
 npm install -g @thisisayande/hommies
@@ -46,7 +47,8 @@ hommies setup --dry-run   # preview
 hommies setup
 ```
 
-In a terminal, setup first lists Claude Code, Codex, and OpenCode with whether
+In a terminal, setup first lists Claude Code, Codex, OpenCode, Gemini CLI,
+Antigravity, and Grok Build with whether
 each is installed, and lets you pick which to set up (arrows or `j`/`k` move,
 space toggles, enter confirms). `--yes` sets up every installed agent without
 asking, and `--only` names them; neither prompts, and nor does a non-terminal run.
@@ -57,7 +59,7 @@ every file it changes is first backed up as `<file>.hommies-backup-<time>`.
 It respects `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, and `XDG_CONFIG_HOME`, writes
 through symlinked dotfiles, and leaves unparseable files and OpenCode's
 `opencode.jsonc` untouched (register those by hand as described below). Limit it
-with `--only claude,codex,opencode`.
+with `--only claude,codex,opencode,gemini,antigravity,grok`.
 
 To see whether each agent's hooks match what this version of setup writes:
 
@@ -133,6 +135,8 @@ After installing `@thisisayande/hommies`, add this hook to `~/.claude/settings.j
     "StopFailure": [{ "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/hommies/dist/claude-hook.js", "timeout": 5 }] }],
     "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/hommies/dist/claude-hook.js", "timeout": 5 }] }],
     "SessionEnd": [{ "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/hommies/dist/claude-hook.js", "timeout": 5 }] }],
+    "SubagentStart": [{ "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/hommies/dist/claude-hook.js", "timeout": 5 }] }],
+    "SubagentStop": [{ "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/hommies/dist/claude-hook.js", "timeout": 5 }] }],
     "PermissionRequest": [
       {
         "hooks": [
@@ -199,6 +203,11 @@ checks its closing paragraph. If it ends with `?` or asks for a decision
 item: the session is listed with a "Done" marker and the opening line of
 Claude's report, and it counts toward `totalCount` so the bell notifies you.
 
+Both kinds also carry the full final message in an optional `message` field
+(Markdown, cut at a line break to 4000 characters), unless it adds nothing to
+`summary`. The panel folds it under **Show full message**. The message is
+never passed to desktop notifications.
+
 Both are notify-only: you reply in the terminal. They clear when you
 submit a prompt in that session (`UserPromptSubmit`), when the session ends
 (`SessionEnd`), when Claude starts another tool request in that session, when
@@ -220,7 +229,9 @@ busy.
 | `UserPromptSubmit` | thinking | `> ` + the prompt's first line |
 | `PreToolUse` | working | tool + command, file name, pattern, query, or URL |
 | `PostToolUseFailure` | working | same, with `(failed)` |
-| `Stop` | idle | — |
+| `SubagentStart` | working | `Subagent ` + the subagent's name, such as `Subagent Explore` |
+| `SubagentStop` | working, or idle once the turn has ended and no subagent is left | `Subagent Explore finished` |
+| `Stop` | idle, or working while a background subagent still runs | — |
 | `SessionEnd` | removed | — |
 
 Sessions keep their last 20 steps in memory. When an adapter sends the
@@ -238,26 +249,56 @@ file contents or diffs. The activity hooks run on every tool call, so they stay
 cheap: no transcript reads, a 1-second request timeout, and no stdout. If the
 bridge is not running they exit at once.
 
+### Edit line counts
+
+For file edits, the panel shows how many lines the edit adds and removes next
+to the step, for example `Edit server.ts  +12 −3`. The adapter works the counts
+out itself and sends only the two numbers as `edit: { "added": 12, "removed": 3 }`.
+The edited text never reaches the bridge.
+
+| Tool | How the lines are counted |
+| --- | --- |
+| `Edit` (Claude), `edit` (OpenCode) | Line diff of `old_string` and `new_string`. With `replace_all`, multiplied by how often `old_string` appears in the file. |
+| `MultiEdit` | Sum over its edits. |
+| `Write` | Line diff of the file on disk and the new content; a new file is all additions. |
+| `apply_patch` (Codex), `patch` (OpenCode) | `+` and `-` lines in the `*** Begin Patch` block, also when it runs through the shell tool. |
+
+Counts are taken on `PreToolUse`, so they describe the edit the agent asked for,
+even if it later fails. The adapter reads the target file only for `Write` and
+`replace_all` edits, and skips files over 1 MB (a `Write` then counts its new
+lines only). The diff matches lines like `git diff --numstat`. A very large
+edit is counted roughly instead, so a hook never slows the agent down.
+
 `GET /v1/pending` lists the activity in `sessions`, newest first:
 
 ```json
 {
   "sessions": [{
     "threadId": "<session id>", "provider": "claude", "state": "working",
-    "steps": ["> fix the build", "Bash pnpm build"],
+    "steps": ["> fix the build", "Bash pnpm build", "Edit server.ts"],
+    "stepEdits": [null, null, { "added": 12, "removed": 3 }],
     "sessionTitle": "Fix the build", "project": "app", "updatedAt": "2026-10-01T12:00:00.000Z"
   }]
 }
 ```
 
-The field is optional, so older plugin copies ignore it. Adapters post to
+The field is optional, so older plugin copies ignore it. `stepEdits` is
+index-aligned with `steps` (`null` for steps that are not edits) and is absent
+when no listed step is an edit. Adapters post to
 `/v1/providers/{claude,codex,opencode,omacode}/activity`:
 
 ```json
 { "hook_event_name": "PreToolUse", "session_id": "...", "cwd": "/w/app", "tool_name": "Bash", "tool_input": { "command": "pnpm build" } }
 ```
 
-`hook_event_name` is `SessionStart`, `PreToolUse`, or `PostToolUseFailure`. The
+`hook_event_name` is `SessionStart`, `PreToolUse`, `PostToolUseFailure`,
+`SubagentStart`, or `SubagentStop`. A `PreToolUse` that edits a file may add
+`"edit": { "added": 12, "removed": 3 }`; the bridge ignores it unless both are
+non-negative integers. The subagent events add `agent_id` (pairs the start
+with its stop) and `agent_type` (the name shown in the step); the subagent's
+reply is never sent. A subagent stopping never clears the session's turn-end
+item, and a new prompt forgets any subagent whose stop never came (for
+example after Esc). The
 prompt step comes from an optional `prompt` field on the existing
 `UserPromptSubmit` body sent to `/v1/providers/{provider}/resume`.
 
@@ -318,8 +359,10 @@ Claude-style hook JSON on stdin and reports to `/v1/agents/<name>/...`:
 
 - The name comes from `--agent`, then `$HOMMIES_AGENT`, then an `agent`
   field in the payload. It must be 1-24 lowercase letters, digits, or hyphens,
-  and not `claude`, `codex`, `opencode`, `omacode`, `cursor`, `grok`, or
-  `antigravity`, so a custom agent cannot pose as a built-in one. Invalid
+  and not `claude`, `codex`, `opencode`, `omacode`, `cursor`, `grok`,
+  `antigravity`, or `gemini`, so a custom agent cannot pose as a built-in one.
+  (`gemini` became reserved when Gemini CLI got its own hook; a custom agent
+  named `gemini` should switch to `hommies setup --only gemini`.) Invalid
   names are dropped by the hook and rejected by the bridge with `400`; such
   events never reach a built-in provider.
 - Supported: live activity (`SessionStart`, `PreToolUse`,
@@ -511,3 +554,97 @@ Omacode keeps showing its own prompt, and whichever surface answers first wins.
 It reads `port.json` on every report, so it follows a restarted bridge, and does
 nothing when the bridge is not running. `FREECODE_AGENT_FOLD=0` turns it off.
 A headless `freecode run` never reports.
+
+## Gemini CLI, Antigravity, and Grok Build
+
+These agents get [live activity](#live-activity), turn ends (`finished` and
+`attention` items), and, where the agent reports them, failed turns. Their
+hooks cannot answer a permission or a question, so those stay in the agent's
+own prompt, and the hooks never return a decision. Each one translates the
+agent's payload to Claude's events and posts to
+`/v1/providers/{gemini,antigravity,grok}/{activity,stop,resume,failure}`.
+`hommies setup` registers them; to do it by hand, use the entries below with
+the absolute path of the hook file in this package's `dist/`.
+
+### Gemini CLI
+
+`hommies-gemini-hook` (`dist/gemini-hook.js`), in `~/.gemini/settings.json`.
+Timeouts are in milliseconds. Gemini CLI reads a JSON object from every hook's
+stdout, so the hook always prints `{}` (no decision), even when the bridge is
+not running.
+
+| Gemini CLI event | Reported as |
+| --- | --- |
+| `SessionStart`, `SessionEnd` | the same |
+| `BeforeTool` (matcher `*`) | `PreToolUse` step |
+| `BeforeAgent` | `UserPromptSubmit` (thinking, with the prompt) |
+| `AfterAgent` | `Stop`, with `prompt_response` as the final message |
+
+`AfterTool` and the model events are not hooked: one step per tool call is
+enough, and `AfterModel` fires on every streamed chunk. Gemini CLI has no
+failure hook, so failed turns are not reported.
+
+```json
+{
+  "hooks": {
+    "BeforeTool": [{ "matcher": "*", "hooks": [{ "type": "command", "command": "test -f /path/to/dist/gemini-hook.js && node /path/to/dist/gemini-hook.js || echo '{}'", "timeout": 5000 }] }]
+  }
+}
+```
+
+Register `SessionStart`, `BeforeAgent`, `AfterAgent`, and `SessionEnd` the same
+way, without the matcher. Gemini CLI may ask you to approve changed hooks.
+
+### Antigravity
+
+`hommies-antigravity-hook` (`dist/antigravity-hook.js`), as a `hommies` entry in
+`~/.gemini/config/hooks.json`, which is keyed by hook name. Antigravity's
+payload does not name the event, so each command passes it as an argument.
+Like Gemini CLI, Antigravity reads JSON from stdout and gets `{}`.
+
+```json
+{
+  "hommies": {
+    "enabled": true,
+    "PostToolUse": [{ "matcher": "*", "hooks": [{ "type": "command", "command": "test -f /path/to/dist/antigravity-hook.js && node /path/to/dist/antigravity-hook.js PostToolUse || echo '{}'", "timeout": 5 }] }],
+    "Stop": [{ "type": "command", "command": "test -f /path/to/dist/antigravity-hook.js && node /path/to/dist/antigravity-hook.js Stop || echo '{}'", "timeout": 5 }]
+  }
+}
+```
+
+- `PostToolUse` adds a step once the tool has run (`(failed)` when it sent an
+  `error`). `PreToolUse` is not hooked because its answer must be a permission
+  decision.
+- `Stop` ends the turn when `fullyIdle` is not `false`. A `Stop` with an
+  `error` is reported as a failed turn.
+- `PreInvocation` and `PostInvocation` run on every model call, not once per
+  prompt, so they are not hooked. Antigravity sessions therefore never show
+  **Thinking**, and since its payloads carry no final message, a turn end reads
+  "Turn finished."
+- The session is the `conversationId`, and the project is the first of
+  `workspacePaths`.
+
+### Grok Build
+
+`hommies-grok-hook` (`dist/grok-hook.js`), in a hook file of its own,
+`~/.grok/hooks/hommies.json`, so your other Grok hook files are never touched.
+It uses Claude's event names (`SessionStart`, `UserPromptSubmit`,
+`PreToolUse`, `PostToolUseFailure`, `Stop`, `StopFailure`, `SessionEnd`) with
+camelCase fields (`sessionId`, `toolName`, `toolInput`, ...), and also reads
+`GROK_HOOK_EVENT`, `GROK_SESSION_ID`, and `GROK_WORKSPACE_ROOT`. The hook
+writes nothing to stdout, which Grok treats as no opinion, so the tool call
+goes through Grok's normal permission flow.
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [{ "hooks": [{ "type": "command", "command": "test -f /path/to/dist/grok-hook.js && node /path/to/dist/grok-hook.js || true", "timeout": 5 }] }]
+  }
+}
+```
+
+Register the other events the same way. Grok Build also runs Claude Code's
+hooks from `.claude/settings.json`. When `GROK_HOOK_EVENT` is set, the Claude
+hook exits at once without output, so a Grok session is reported once, under
+Grok, and never gets a Claude-style answer that Grok would ignore.
+

@@ -5,7 +5,7 @@
   "version": "0.1.0",
   "author": "Ayan De",
   "license": "MIT",
-  "description": "Hommie, a floating companion that watches your coding agents (Claude Code, Codex, OpenCode, Omacode) and lets you approve permissions, answer questions, and see when turns finish.",
+  "description": "Hommie, a floating companion that watches your coding agents (Claude Code, Codex, OpenCode, Omacode, Gemini CLI, Antigravity, Grok Build) and lets you approve permissions, answer questions, and see when turns finish.",
   "kinds": [
     "bar-widget",
     "service"

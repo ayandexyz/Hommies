@@ -7,6 +7,7 @@ import { nonceHeader, proofHeader, responseProof, validNonce } from "./bridge-id
 import { ApprovalRequestId, ThreadId, type ProviderDriverKind } from "./localContracts.js";
 import type {
   ActivityHookInput,
+  EditStats,
   AgentProcessFields,
   BridgePreferencesInput,
   FailureHookInput,
@@ -25,7 +26,7 @@ import type {
   SessionActivityState,
   SessionFailureKind,
 } from "./types.js";
-import { detectReplyRequest, summarizeFinishedTurn } from "./stop-detection.js";
+import { detectReplyRequest, finalMessage, summarizeFinishedTurn } from "./stop-detection.js";
 import { isValidAgentName } from "./agent-name.js";
 import { focusHyprlandWindow, validTmux, type FocusWindow } from "./focus.js";
 import { procAgentProbe, type AgentProcessProbe, type ProcessIdentity } from "./process-tree.js";
@@ -40,6 +41,8 @@ const idleSessionTimeoutMs = 30 * 60 * 1000;
 /** A busy session can sit in one long tool call (a build, a test run), so it gets longer. */
 const busySessionTimeoutMs = 3 * 60 * 60 * 1000;
 const maxSessionSteps = 20;
+/** Running subagents tracked per session; more are still shown as steps. */
+const maxSubagents = 32;
 const hookCheckIntervalMs = 60 * 1000;
 /** How often sessions are checked for an agent process that has exited. */
 const agentExitCheckIntervalMs = 5 * 1000;
@@ -92,12 +95,17 @@ interface PendingQuestion {
   readonly timer: ReturnType<typeof setTimeout>;
 }
 
-type BuiltInProvider = "claude" | "codex" | "opencode" | "omacode";
-const builtInProviders: ReadonlyArray<BuiltInProvider> = ["claude", "codex", "opencode", "omacode"];
+type BuiltInProvider = "claude" | "codex" | "opencode" | "omacode" | ActivityOnlyProvider;
+/**
+ * Agents whose hooks report live activity, turn ends, and failures only:
+ * they have no hook that can answer a permission or question.
+ */
+type ActivityOnlyProvider = "gemini" | "antigravity" | "grok";
+const builtInProviders: ReadonlyArray<BuiltInProvider> = ["claude", "codex", "opencode", "omacode", "gemini", "antigravity", "grok"];
 
 declare const customAgentBrand: unique symbol;
 /** A validated custom agent name; only `customAgentName` creates one. */
-type NamedDriverKind = "claude" | "codex" | "opencode" | "omacode" | "cursor" | "grok" | "antigravity";
+type NamedDriverKind = "claude" | "codex" | "opencode" | "omacode" | "cursor" | "grok" | "antigravity" | "gemini";
 type CustomAgent = Exclude<ProviderDriverKind, NamedDriverKind> & { readonly [customAgentBrand]: true };
 type Provider = BuiltInProvider | CustomAgent;
 
@@ -127,6 +135,9 @@ const providerLabels: Record<BuiltInProvider, { readonly agent: string; readonly
   codex: { agent: "Codex", thread: "Codex" },
   opencode: { agent: "OpenCode", thread: "OpenCode" },
   omacode: { agent: "Omacode", thread: "Omacode" },
+  gemini: { agent: "Gemini", thread: "Gemini CLI" },
+  antigravity: { agent: "Antigravity", thread: "Antigravity" },
+  grok: { agent: "Grok", thread: "Grok Build" },
 };
 
 /** Custom agents are labelled with their own name. */
@@ -144,6 +155,8 @@ interface TrackedSession {
   readonly provider: Provider;
   state: SessionActivityState;
   steps: string[];
+  /** Index-aligned with `steps`; null for steps that are not file edits. */
+  stepEdits: (EditStats | null)[];
   cwd: string | undefined;
   sessionTitle: string | undefined;
   updatedAt: string;
@@ -152,6 +165,10 @@ interface TrackedSession {
   tmux: { socket: string; pane: string } | undefined;
   /** The agent process found in `pids`; the session is dropped once it exits. */
   agent: ProcessIdentity | undefined;
+  /** Subagents started and not yet stopped, by `agent_id`. */
+  subagents: Set<string>;
+  /** The main turn ended (`Stop`); the session stays `working` only while subagents run. */
+  turnEnded: boolean;
   timer?: ReturnType<typeof setTimeout>;
 }
 
@@ -317,7 +334,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     if (request.method === "POST" && url.pathname === "/v1/providers/claude/question/resolved") {
       return resolveClaudeQuestion(response, await readJson<ClaudeQuestionHookInput>(request), state);
     }
-    const turn = /^\/v1\/providers\/(claude|codex|opencode|omacode)\/(stop|resume)$/.exec(url.pathname);
+    const turn = /^\/v1\/providers\/(claude|codex|opencode|omacode|gemini|antigravity|grok)\/(stop|resume)$/.exec(url.pathname);
     if (request.method === "POST" && turn) {
       const provider = turn[1] as Provider;
       const input = await readJson<ClaudeTurnHookInput>(request);
@@ -334,11 +351,11 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         default: return receiveResume(response, await readJson<ClaudeTurnHookInput>(request), name, state);
       }
     }
-    const failure = /^\/v1\/providers\/(claude|codex|opencode|omacode)\/failure$/.exec(url.pathname);
+    const failure = /^\/v1\/providers\/(claude|codex|opencode|omacode|gemini|antigravity|grok)\/failure$/.exec(url.pathname);
     if (request.method === "POST" && failure) {
       return receiveFailure(response, await readJson<FailureHookInput>(request), failure[1] as Provider, state);
     }
-    const activity = /^\/v1\/providers\/(claude|codex|opencode|omacode)\/activity$/.exec(url.pathname);
+    const activity = /^\/v1\/providers\/(claude|codex|opencode|omacode|gemini|antigravity|grok)\/activity$/.exec(url.pathname);
     if (request.method === "POST" && activity) {
       return receiveActivity(response, await readJson<ActivityHookInput>(request), activity[1] as Provider, state);
     }
@@ -359,9 +376,14 @@ function receiveStop(response: ServerResponse, input: ClaudeTurnHookInput, provi
   const question = detectReplyRequest(input.last_assistant_message);
   const kind = question === null ? "finished" : "attention";
   const summary = question ?? summarizeFinishedTurn(input.last_assistant_message);
+  const message = finalMessage(input.last_assistant_message, summary);
   if (provider === "codex") dropCodexQuestions(state, input.session_id);
-  trackSession(state, provider, input.session_id, { process: input, cwd: input.cwd, sessionTitle: input.session_title, state: "idle" });
-  setAttention(state, input.session_id, { provider, kind, summary }, input.cwd, input.session_title);
+  // A subagent still running in the background keeps the session busy after the turn ends.
+  const running = state.sessions.get(input.session_id)?.subagents.size ?? 0;
+  trackSession(state, provider, input.session_id, {
+    process: input, cwd: input.cwd, sessionTitle: input.session_title, state: running > 0 ? "working" : "idle", turnEnded: true,
+  });
+  setAttention(state, input.session_id, { provider, kind, summary, ...(message === null ? {} : { message }) }, input.cwd, input.session_title);
   return sendJson(response, 200, { ok: true, attention: kind === "attention" });
 }
 
@@ -369,7 +391,7 @@ function receiveStop(response: ServerResponse, input: ClaudeTurnHookInput, provi
 function setAttention(
   state: BridgeState,
   sessionId: string,
-  fields: Pick<PendingItem, "provider" | "kind" | "summary" | "failure">,
+  fields: Pick<PendingItem, "provider" | "kind" | "summary" | "failure" | "message">,
   cwd: string | undefined,
   sessionTitle: string | undefined,
 ): void {
@@ -432,8 +454,11 @@ function receiveResume(response: ServerResponse, input: ClaudeTurnHookInput, pro
   if (input.hook_event_name === "SessionEnd") dropSession(state, input.session_id);
   else {
     const prompt = typeof input.prompt === "string" ? oneLine(input.prompt, 80) : "";
+    // A subagent interrupted with Esc never sends SubagentStop; a new prompt must not inherit it.
+    state.sessions.get(input.session_id)?.subagents.clear();
     trackSession(state, provider, input.session_id, {
-      process: input, cwd: input.cwd, sessionTitle: input.session_title, state: "thinking", ...(prompt ? { step: `> ${prompt}` } : {}),
+      process: input, cwd: input.cwd, sessionTitle: input.session_title, state: "thinking", turnEnded: false,
+      ...(prompt ? { step: `> ${prompt}` } : {}),
     });
   }
   publish(state);
@@ -456,9 +481,29 @@ function receiveActivity(response: ServerResponse, input: ActivityHookInput, pro
       clearAttention(state, input.session_id);
       if (provider === "codex") dropCodexQuestions(state, input.session_id);
       trackSession(state, provider, input.session_id, {
-        process: input, cwd: input.cwd, sessionTitle: input.session_title, state: "working", step: describeStep(tool, toolInput),
+        process: input, cwd: input.cwd, sessionTitle: input.session_title, state: "working", step: describeStep(tool, toolInput), turnEnded: false,
+        edit: validEditStats(input.edit),
       });
       break;
+    case "SubagentStart":
+    case "SubagentStop": {
+      // Observational only: a subagent stopping never clears the session's turn-end item.
+      const name = typeof input.agent_type === "string" && input.agent_type.trim().length > 0 ? oneLine(input.agent_type, 40) : "agent";
+      const id = typeof input.agent_id === "string" && input.agent_id.length > 0 ? input.agent_id.slice(0, 200) : null;
+      const session = state.sessions.get(input.session_id);
+      const subagents = session?.subagents ?? new Set<string>();
+      if (input.hook_event_name === "SubagentStart") {
+        if (id !== null && subagents.size < maxSubagents) subagents.add(id);
+      } else if (id !== null) subagents.delete(id);
+      const starting = input.hook_event_name === "SubagentStart";
+      const busy = starting || subagents.size > 0 || session?.turnEnded !== true;
+      trackSession(state, provider, input.session_id, {
+        process: input, cwd: input.cwd, sessionTitle: input.session_title, subagents,
+        state: busy ? "working" : "idle",
+        step: starting ? `Subagent ${name}` : `Subagent ${name} finished`,
+      });
+      break;
+    }
     case "PostToolUseFailure":
       trackSession(state, provider, input.session_id, {
         process: input, cwd: input.cwd, sessionTitle: input.session_title, state: "working", step: `${describeStep(tool, toolInput)} (failed)`,
@@ -476,6 +521,10 @@ interface SessionUpdate {
   readonly sessionTitle?: string | undefined;
   readonly state?: SessionActivityState;
   readonly step?: string;
+  /** Line counts for `step` when it is a file edit. */
+  readonly edit?: EditStats | null;
+  readonly turnEnded?: boolean;
+  readonly subagents?: Set<string>;
   /** The request body; its process fields, when valid, say where the agent runs. */
   readonly process?: AgentProcessFields;
 }
@@ -485,7 +534,8 @@ function trackSession(state: BridgeState, provider: Provider, sessionId: string,
   const existing = state.sessions.get(sessionId);
   if (existing) clearTimeout(existing.timer);
   const session: TrackedSession = existing ?? {
-    provider, state: "idle", steps: [], cwd: undefined, sessionTitle: undefined, updatedAt: "", pids: [], tmux: undefined, agent: undefined,
+    provider, state: "idle", steps: [], stepEdits: [], cwd: undefined, sessionTitle: undefined, updatedAt: "", pids: [], tmux: undefined, agent: undefined,
+    subagents: new Set(), turnEnded: false,
   };
   const pids = validPids(update.process?.pids);
   if (pids.length > 0) {
@@ -497,9 +547,15 @@ function trackSession(state: BridgeState, provider: Provider, sessionId: string,
   if (typeof update.cwd === "string" && update.cwd.length > 0) session.cwd = update.cwd;
   if (typeof update.sessionTitle === "string" && update.sessionTitle.length > 0) session.sessionTitle = update.sessionTitle;
   if (update.state !== undefined) session.state = update.state;
+  if (update.turnEnded !== undefined) session.turnEnded = update.turnEnded;
+  if (update.subagents !== undefined) session.subagents = update.subagents;
   if (update.step !== undefined) {
     session.steps.push(update.step);
-    if (session.steps.length > maxSessionSteps) session.steps.splice(0, session.steps.length - maxSessionSteps);
+    session.stepEdits.push(update.edit ?? null);
+    if (session.steps.length > maxSessionSteps) {
+      session.steps.splice(0, session.steps.length - maxSessionSteps);
+      session.stepEdits.splice(0, session.stepEdits.length - maxSessionSteps);
+    }
   }
   session.updatedAt = new Date().toISOString();
   const timer = setTimeout(() => {
@@ -976,6 +1032,7 @@ function sessionsSnapshot(state: BridgeState): SessionActivity[] {
         provider: session.provider,
         state: session.state,
         steps: [...session.steps],
+        ...(session.stepEdits.some((edit) => edit !== null) ? { stepEdits: [...session.stepEdits] } : {}),
         ...(session.sessionTitle ? { sessionTitle: session.sessionTitle } : {}),
         ...(project ? { project } : {}),
         updatedAt: session.updatedAt,
@@ -1080,6 +1137,14 @@ async function readJson<T>(request: IncomingMessage): Promise<T> {
 
 function isClaudePermissionInput(input: ClaudePermissionHookInput): boolean {
   return typeof input.session_id === "string" && typeof input.cwd === "string" && typeof input.tool_name === "string" && input.tool_input !== null && typeof input.tool_input === "object";
+}
+
+/** Line counts from an adapter, or null when missing or not two sane non-negative integers. */
+function validEditStats(value: unknown): EditStats | null {
+  if (value === null || typeof value !== "object") return null;
+  const { added, removed } = value as Record<string, unknown>;
+  const count = (n: unknown): n is number => typeof n === "number" && Number.isSafeInteger(n) && n >= 0 && n <= 10_000_000;
+  return count(added) && count(removed) ? { added, removed } : null;
 }
 
 /** A short activity label such as `Edit server.ts` or `Bash pnpm test`. */

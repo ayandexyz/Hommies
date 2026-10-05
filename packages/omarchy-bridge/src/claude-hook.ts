@@ -10,6 +10,10 @@ import { readSessionTitle, readTranscriptTail } from "./transcript.js";
 type HookEvent = ActivityHookEvent & FailureHookEvent;
 
 async function main(): Promise<void> {
+  // Grok Build also runs Claude Code's hooks from .claude/settings.json. Its own
+  // hook (grok-hook.js) reports those sessions, and Grok ignores Claude-style
+  // decisions, so stay silent rather than list the session twice under Claude.
+  if (process.env.GROK_HOOK_EVENT) return;
   const input = await readStdin();
   let event: HookEvent;
   try { event = JSON.parse(input) as HookEvent; } catch { return; }

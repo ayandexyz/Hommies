@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-Hommies is an Omarchy top-bar plugin (a bell) that shows pending **permission requests**, **questions**, and **turn ends** from coding agents (Claude Code, Codex, OpenCode, Omacode) and lets you answer some of them from the bar. `AGENTS.md` has the project rules. Its "What is NOT done yet" section is out of date: the server, the HTTP routes, and the QML client are all implemented now.
+Hommies is an Omarchy top-bar plugin (a bell) that shows pending **permission requests**, **questions**, and **turn ends** from coding agents (Claude Code, Codex, OpenCode, Omacode, and activity-only Gemini CLI, Antigravity, Grok Build) and lets you answer some of them from the bar. `AGENTS.md` has the project rules. Its "What is NOT done yet" section is out of date: the server, the HTTP routes, and the QML client are all implemented now.
 
 ## Commands
 

@@ -109,6 +109,55 @@ test("the compiled Codex hook reports tool calls without answering them", async 
   });
 });
 
+test("subagents add steps and keep a session busy until the last one stops", async () => {
+  await withServer(async ({ request }) => {
+    const send = (path, body) => request("POST", `/v1/providers/claude/${path}`, { session_id: "sa", cwd: "/w/app", ...body });
+    const session = async () => (await pending(request)).sessions[0];
+
+    await send("resume", { hook_event_name: "UserPromptSubmit", prompt: "audit it" });
+    await send("activity", { hook_event_name: "PreToolUse", tool_name: "Agent", tool_input: { description: "Find auth code" } });
+    await send("activity", { hook_event_name: "SubagentStart", agent_id: "a1", agent_type: "Explore" });
+    await send("activity", { hook_event_name: "SubagentStart", agent_id: "a2", agent_type: "security-reviewer" });
+    await send("activity", { hook_event_name: "SubagentStop", agent_id: "a1", agent_type: "Explore", last_assistant_message: "secret findings" });
+    let current = await session();
+    assert.equal(current.state, "working");
+    assert.deepEqual(current.steps.slice(-3), ["Subagent Explore", "Subagent security-reviewer", "Subagent Explore finished"]);
+    assert.ok(!JSON.stringify(current).includes("secret findings"), "a subagent's reply is not kept");
+
+    // The main turn ends while a2 still runs in the background.
+    await send("stop", { hook_event_name: "Stop", last_assistant_message: "Started the review." });
+    let snapshot = await pending(request);
+    assert.equal(snapshot.sessions[0].state, "working");
+    assert.equal(snapshot.totalCount, 1, "the turn still ends");
+
+    await send("activity", { hook_event_name: "SubagentStop", agent_id: "a2", agent_type: "security-reviewer" });
+    snapshot = await pending(request);
+    assert.equal(snapshot.sessions[0].state, "idle");
+    assert.equal(snapshot.totalCount, 1, "a subagent stopping does not clear the finished item");
+
+    // A subagent whose stop never came (Esc) does not outlive the next prompt.
+    await send("activity", { hook_event_name: "SubagentStart", agent_id: "a3" });
+    assert.equal((await session()).steps.at(-1), "Subagent agent");
+    await send("resume", { hook_event_name: "UserPromptSubmit", prompt: "next" });
+    await send("stop", { hook_event_name: "Stop", last_assistant_message: "Done." });
+    assert.equal((await session()).state, "idle");
+  });
+});
+
+test("the compiled Claude hook reports subagent events without blocking", async () => {
+  await withServer(async ({ request, dataDir }) => {
+    const started = Date.now();
+    const stdout = await runHook("claude-hook.js", {
+      hook_event_name: "SubagentStart", session_id: "k2", cwd: "/w/app", agent_id: "s1", agent_type: "Plan", agent_transcript_path: "/t",
+    }, { HOMMIES_DATA_DIR: dataDir });
+    assert.equal(stdout, "");
+    assert.ok(Date.now() - started < 5_000, "never sent down the blocking permission path");
+    const snapshot = await pending(request);
+    assert.equal(snapshot.totalCount, 0, "not a permission");
+    assert.deepEqual(sessionsOf(snapshot), [["k2", "claude", "working", ["Subagent Plan"]]]);
+  });
+});
+
 test("a rate limit becomes a dismissable item and a ratelimit session state", async () => {
   const sent = [];
   await withServer(async ({ request }) => {

@@ -32,13 +32,16 @@ function fail(message: string): never {
 function report(results: ReadonlyArray<SetupResult>, uninstall: boolean): void {
   for (const result of results) {
     const mark = { updated: "✓", unchanged: "=", skipped: "-", error: "✗" }[result.status];
-    process.stdout.write(`${mark} ${result.provider.padEnd(8)} ${result.message} (${result.file})\n`);
-    if (result.backup !== undefined) process.stdout.write(`             backup: ${result.backup}\n`);
+    process.stdout.write(`${mark} ${result.provider.padEnd(11)} ${result.message} (${result.file})\n`);
+    if (result.backup !== undefined) process.stdout.write(`              backup: ${result.backup}\n`);
   }
   if (uninstall) return;
   const updated = new Set(results.filter((result) => result.status === "updated").map((result) => result.provider));
   if (updated.has("codex")) process.stdout.write("\nCodex: review and trust the new hooks from Codex's /hooks screen.\n");
   if (updated.has("opencode")) process.stdout.write("OpenCode: restart OpenCode to load the plugin.\n");
+  if (updated.has("gemini")) process.stdout.write("Gemini CLI: restart it, and approve the new hooks if it asks.\n");
+  if (updated.has("antigravity")) process.stdout.write("Antigravity: restart agy to load the hooks.\n");
+  if (updated.has("grok")) process.stdout.write("Grok Build: restart grok to load the hooks.\n");
   if (updated.size > 0) process.stdout.write("Omacode needs no setup; its integration is built in.\n");
 }
 
@@ -51,7 +54,9 @@ const checkLines: Record<HookCheck["status"], string> = {
   error: "✗ config could not be read",
 };
 
-const providerLabels: Record<SetupProvider, string> = { claude: "Claude Code", codex: "Codex", opencode: "OpenCode" };
+const providerLabels: Record<SetupProvider, string> = {
+  claude: "Claude Code", codex: "Codex", opencode: "OpenCode", gemini: "Gemini CLI", antigravity: "Antigravity", grok: "Grok Build",
+};
 
 const pickHints: Record<HookCheck["status"], string> = {
   current: "hooks up to date",
@@ -79,7 +84,7 @@ async function pickProviders(): Promise<SetupProvider[] | null> {
 function reportChecks(checks: ReadonlyArray<HookCheck>): void {
   for (const check of checks) {
     const [mark, ...words] = checkLines[check.status].split(" ");
-    process.stdout.write(`${mark} ${check.provider.padEnd(8)} ${words.join(" ")} (${check.file})\n`);
+    process.stdout.write(`${mark} ${check.provider.padEnd(11)} ${words.join(" ")} (${check.file})\n`);
   }
 }
 

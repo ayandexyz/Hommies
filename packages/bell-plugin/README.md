@@ -15,6 +15,7 @@ runs the daemon this plugin talks to.
 | `FloatingPanel.qml` | The floating card: provider tabs, sessions, and items only (no settings, no outdated-hooks notice). A separate copy of `Panel.qml` so the two UIs can diverge. |
 | `characters/*.qml` | Swappable characters. `Hommie.qml` (the Omarchy mark with eyes) is the default. |
 | `bridge.js` | JS module loaded by the QML files. Talks to the bridge over `127.0.0.1`. |
+| `markdown.js` | Turns an agent's final message into Qt StyledText for **Show full message**. Escapes all agent text and adds only formatting tags (no images or links). |
 
 ## Floating character
 
@@ -30,9 +31,74 @@ position, monitor, and `character`) are saved in `$XDG_DATA_HOME/hommies/floatin
 bell still works. If you keep both, they share the same bridge preferences, so
 remove the bell from the bar to avoid toggling them from two places.
 
+### Outfits
+
+Right-click Hommie and use **Outfit ‹ ›** to dress him: a party hat, beanie,
+crown, Santa hat, pumpkin, bow, glasses, sunglasses, or a scarf. They are
+pixel art in the mark's own grid, coloured from the theme, and they tilt,
+squash, and hop with him. Status badges are drawn on top, so an outfit never
+hides an alert. **Auto** (the default) dresses him for the season: a pumpkin
+from 20 October, a Santa hat in December, and a party hat on 31 December and
+1 January; otherwise he wears nothing. The choice is saved as `outfit` in
+`floating.json`. `node scripts/render-preview.mjs --outfits` renders every
+outfit into one image.
+
 To swap the character, add `characters/<Name>.qml` implementing the contract at
 the top of `characters/Hommie.qml` (`mood`, `lookX`, `lookY`, `running`,
-`poke()`), then set `"character": "<Name>"` in `floating.json`.
+`poke()`, and optionally `emote(name)` for the greeting, celebrate jump, and idle emotes), then set `"character": "<Name>"` in `floating.json`.
+
+## Keyboard shortcuts
+
+### Global (Hyprland binds)
+
+Plugins cannot bind keys, so Hommies exposes its actions over shell IPC on the
+`hommies` target, and you bind them in your own Hyprland config. With
+Omarchy's Lua bindings (`~/.config/hypr/bindings.lua`):
+
+```lua
+o.bind("SUPER + ALT + A", "Hommies: answer next", "omarchy-shell hommies jumpToPending")
+o.bind("SUPER + ALT + H", "Hommies: toggle card", "omarchy-shell hommies toggle")
+o.bind("SUPER + ALT + T", "Hommies: go to agent terminal", "omarchy-shell hommies focusTerminal")
+o.bind("SUPER + ALT + M", "Hommies: toggle sounds", "omarchy-shell hommies toggleSounds")
+```
+
+The keys are only examples; pick ones your config does not use. With a
+classic `bindings.conf`:
+
+```ini
+bindd = SUPER ALT, A, Hommies: answer next, exec, omarchy-shell hommies jumpToPending
+```
+
+| Method | Effect | Returns |
+| --- | --- | --- |
+| `jumpToPending` | Opens the card on the oldest waiting permission or question, else the oldest turn end | the item kind, or `none` |
+| `toggle` / `open` / `close` | Opens or closes the card | `open`, `closed`, or `unavailable` |
+| `focusTerminal` | Focuses the terminal of the session waiting on you, else the newest busy one | `ok` or `none` |
+| `toggleSounds` | Turns sounds on or off | `on` or `off` |
+| `toggleNotifications` | Turns desktop notifications on or off | `on` or `off` |
+| `outfit <name>` | Dresses Hommie: `auto`, `none`, or an outfit below | what he wears now, or `none` |
+| `emote <name>` | Plays `greet`, `celebrate`, `dizzy`, `wink`, `yawn`, or `look` | `ok` |
+
+A card opened by a shortcut takes the keyboard right away, so the keys below
+work without a click. The IPC actions drive the floating card; the bar
+panel's keys work the same once it is open.
+
+### In the panel
+
+| Key | Session list | Open session |
+| --- | --- | --- |
+| `↑` `↓` (`k` `j`) | Move the selection | — |
+| `←` `→` (`h` `l`) | Previous / next agent tab | `←` goes back to the list |
+| `Enter` | Open the selected session | Submit the question's answers |
+| `1`–`9` | Open the session at that position | Pick that option of the current question |
+| `a` / `d` / `A` | — | Allow / Deny / Always allow a permission (`A` only when offered) |
+| `x` | — | Dismiss a finished or waiting item |
+| `t` | Go to the selected session's terminal | Go to its terminal |
+| `Esc` | Close | Back to the list |
+
+Once a key is used, a hint line at the bottom lists the keys that do
+something right now. Questions answered in the agent's CLI (the "Claude CLI"
+answer surface) stay read-only here too.
 
 ## Answer surface
 

@@ -18,9 +18,12 @@
         "agent-fold-codex-hook": "dist/codex-hook.js",
         "agent-fold-hook": "dist/agent-hook.js",
         "hommies": "dist/cli.js",
+        "hommies-antigravity-hook": "dist/antigravity-hook.js",
         "hommies-bridge": "dist/runtime.js",
         "hommies-claude-hook": "dist/claude-hook.js",
         "hommies-codex-hook": "dist/codex-hook.js",
+        "hommies-gemini-hook": "dist/gemini-hook.js",
+        "hommies-grok-hook": "dist/grok-hook.js",
         "hommies-hook": "dist/agent-hook.js"
       },
       "devDependencies": {

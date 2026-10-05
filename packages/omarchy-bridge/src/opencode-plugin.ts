@@ -12,6 +12,7 @@
  * Only the plugin function is exported: OpenCode calls every export of a
  * plugin module as a plugin.
  */
+import { editStats } from "./edit-stats.js";
 import { postToBridge, readConnection } from "./hook-common.js";
 import { processFields, type ProcessFields } from "./process-tree.js";
 
@@ -164,9 +165,11 @@ export const HommiesOpenCode = async (input: PluginInput) => {
   const onToolCall = async (sessionId: string, tool: string, args: unknown): Promise<void> => {
     const rootId = roots.get(sessionId);
     const session = rootId === undefined ? await rootSession(sessionId) : null;
-    const fields = session === null ? { session_id: rootId ?? sessionId } : sessionFields(session);
+    const fields: Record<string, string> = session === null ? { session_id: rootId ?? sessionId } : sessionFields(session);
+    // Only the line counts are sent; the edited text stays in OpenCode.
+    const edit = await editStats(tool, args, fields.cwd).catch(() => null);
     await send("/v1/providers/opencode/activity", {
-      ...fields, hook_event_name: "PreToolUse", tool_name: tool, tool_input: stepDetail(args),
+      ...fields, hook_event_name: "PreToolUse", tool_name: tool, tool_input: stepDetail(args), ...(edit === null ? {} : { edit }),
     }, turnTimeoutMs);
   };
 
