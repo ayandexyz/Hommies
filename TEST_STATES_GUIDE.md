@@ -187,6 +187,18 @@ To see `celebrate` through the real path, choose **Finished while another
 agent works** (`node test-states.mjs finishedBusy`): a working session keeps
 the mood on working, and the second session's finished turn makes him jump.
 
+## Outfits
+
+```sh
+node test-states.mjs outfit santa    # auto, none, party, beanie, crown, santa,
+                                     # pumpkin, bow, glasses, sunglasses, scarf
+omarchy-shell hommies outfit none    # the same call
+node scripts/render-preview.mjs --outfits outfits.png   # every outfit, one image
+```
+
+Outfits combine with every mood and emote, so try one with `approval` (the
+badge stays on top) and with `emote dizzy` (the hat wobbles with him).
+
 ## API Details
 
 The test script sends JSON requests to the bridge. Examples:

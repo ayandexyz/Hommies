@@ -31,6 +31,18 @@ position, monitor, and `character`) are saved in `$XDG_DATA_HOME/hommies/floatin
 bell still works. If you keep both, they share the same bridge preferences, so
 remove the bell from the bar to avoid toggling them from two places.
 
+### Outfits
+
+Right-click Hommie and use **Outfit ‹ ›** to dress him: a party hat, beanie,
+crown, Santa hat, pumpkin, bow, glasses, sunglasses, or a scarf. They are
+pixel art in the mark's own grid, coloured from the theme, and they tilt,
+squash, and hop with him. Status badges are drawn on top, so an outfit never
+hides an alert. **Auto** (the default) dresses him for the season: a pumpkin
+from 20 October, a Santa hat in December, and a party hat on 31 December and
+1 January; otherwise he wears nothing. The choice is saved as `outfit` in
+`floating.json`. `node scripts/render-preview.mjs --outfits` renders every
+outfit into one image.
+
 To swap the character, add `characters/<Name>.qml` implementing the contract at
 the top of `characters/Hommie.qml` (`mood`, `lookX`, `lookY`, `running`,
 `poke()`, and optionally `emote(name)` for the greeting, celebrate jump, and idle emotes), then set `"character": "<Name>"` in `floating.json`.
@@ -64,6 +76,8 @@ bindd = SUPER ALT, A, Hommies: answer next, exec, omarchy-shell hommies jumpToPe
 | `focusTerminal` | Focuses the terminal of the session waiting on you, else the newest busy one | `ok` or `none` |
 | `toggleSounds` | Turns sounds on or off | `on` or `off` |
 | `toggleNotifications` | Turns desktop notifications on or off | `on` or `off` |
+| `outfit <name>` | Dresses Hommie: `auto`, `none`, or an outfit below | what he wears now, or `none` |
+| `emote <name>` | Plays `greet`, `celebrate`, `dizzy`, `wink`, `yawn`, or `look` | `ok` |
 
 A card opened by a shortcut takes the keyboard right away, so the keys below
 work without a click. The IPC actions drive the floating card; the bar

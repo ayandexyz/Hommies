@@ -85,6 +85,46 @@ Item {
   function setSounds(enabled) { savePrefs({ sounds: enabled === true }) }
   function setOverFullscreen(enabled) { savePrefs({ overFullscreen: enabled === true }) }
 
+  // --- outfit ----------------------------------------------------------------
+
+  /** Accessories the character can wear (see `outfit` in characters/Hommie.qml). */
+  readonly property var outfits: ["party", "beanie", "crown", "santa", "pumpkin", "bow", "glasses", "sunglasses", "scarf"]
+  /** The saved choice: "auto" (the season's, if any), "none", or one of `outfits`. */
+  readonly property string outfitChoice: prefs.outfit === "none" || outfits.indexOf(prefs.outfit) >= 0 ? prefs.outfit : "auto"
+  /** Today, refreshed every hour so Auto changes outfit on its own. */
+  property var today: new Date()
+  readonly property string seasonalOutfit: {
+    var month = today.getMonth(), day = today.getDate()
+    if ((month === 11 && day === 31) || (month === 0 && day === 1)) return "party"
+    if (month === 11) return "santa"
+    if (month === 9 && day >= 20) return "pumpkin"
+    return ""
+  }
+  /** What the character wears now; empty for nothing. */
+  readonly property string outfit: outfitChoice === "auto" ? seasonalOutfit : outfitChoice === "none" ? "" : outfitChoice
+
+  function setOutfit(choice) {
+    savePrefs({ outfit: choice === "none" || outfits.indexOf(choice) >= 0 ? choice : "auto" })
+  }
+  /** Steps through Auto, None, and every outfit. */
+  function cycleOutfit(direction) {
+    var order = ["auto", "none"].concat(outfits)
+    var index = order.indexOf(outfitChoice)
+    setOutfit(order[(index + direction + order.length) % order.length])
+  }
+  function outfitLabel(name) {
+    var labels = { auto: "Auto", none: "None", party: "Party hat", beanie: "Beanie", crown: "Crown", santa: "Santa hat",
+      pumpkin: "Pumpkin", bow: "Bow", glasses: "Glasses", sunglasses: "Sunglasses", scarf: "Scarf" }
+    return labels[name] || String(name)
+  }
+
+  Timer {
+    interval: 60 * 60 * 1000
+    running: true
+    repeat: true
+    onTriggered: root.today = new Date()
+  }
+
   function savePrefs(changes) {
     var next = {}
     for (var key in root.prefs) next[key] = root.prefs[key]
@@ -352,6 +392,12 @@ Item {
     function toggleNotifications(): string {
       root.setDesktopNotifications(!root.desktopNotifications)
       return root.desktopNotifications ? "on" : "off"
+    }
+    /** Sets the outfit ("auto", "none", or a name) and returns what he wears now ("none" for nothing). */
+    function outfit(name: string): string {
+      if (name !== "auto" && name !== "none" && root.outfits.indexOf(name) < 0) return "unknown"
+      root.setOutfit(name)
+      return root.outfit === "" ? "none" : root.outfit
     }
     /** Plays an emote: greet, celebrate, dizzy, wink, yawn, or look. Urgent moods block them. */
     function emote(name: string): string {

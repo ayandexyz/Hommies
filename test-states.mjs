@@ -8,6 +8,7 @@
 //   node test-states.mjs cycle 3    walk through every state, 3s each
 //   node test-states.mjs emote dizzy  play one emote (shell IPC, no bridge needed)
 //   node test-states.mjs emotes 3   play every emote, 3s apart
+//   node test-states.mjs outfit santa  dress him (auto, none, or an outfit name)
 
 import { execFile } from "node:child_process";
 import fs from "node:fs";
@@ -162,6 +163,18 @@ function playEmote(name) {
   });
 }
 
+const outfits = ["auto", "none", "party", "beanie", "crown", "santa", "pumpkin", "bow", "glasses", "sunglasses", "scarf"];
+
+function setOutfit(name) {
+  return new Promise((resolve, reject) => {
+    execFile("omarchy-shell", ["hommies", "outfit", name], (error, stdout) => {
+      if (error) return reject(new Error(`omarchy-shell failed: ${error.message}`));
+      console.log(`  -> outfit ${name} (wearing: ${stdout.trim() || "?"})`);
+      resolve();
+    });
+  });
+}
+
 async function cycleEmotes(seconds) {
   await reset();
   for (const name of emotes) {
@@ -198,6 +211,14 @@ if (arg === "emote") {
     process.exit(1);
   }
   await playEmote(extra);
+  process.exit(0);
+}
+if (arg === "outfit") {
+  if (!outfits.includes(extra)) {
+    console.error(`Unknown outfit "${extra}". One of: ${outfits.join(", ")}`);
+    process.exit(1);
+  }
+  await setOutfit(extra);
   process.exit(0);
 }
 if (arg === "emotes") {

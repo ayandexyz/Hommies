@@ -5,6 +5,7 @@
 // matches the real character. Needs Chromium.
 //
 //   node scripts/render-preview.mjs [out.png]     (default: ./preview.png)
+//   node scripts/render-preview.mjs --outfits [out.png]   every outfit instead
 //
 // The published plugin keeps it as hommies-plugin/preview.png.
 
@@ -15,7 +16,9 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
-const out = resolve(process.argv[2] ?? "preview.png");
+const args = process.argv.slice(2);
+const outfitSheet = args.includes("--outfits");
+const out = resolve(args.find((arg) => !arg.startsWith("--")) ?? (outfitSheet ? "outfits.png" : "preview.png"));
 const qml = readFileSync(join(root, "packages/bell-plugin/characters/Hommie.qml"), "utf8");
 
 /** Every `function name(...) { ... }` inside the engine QtObject, as plain JS. */
@@ -58,7 +61,7 @@ function engineValue(source, name) {
 
 const functions = engineFunctions(qml);
 const wanted = ["easeOut", "easeInOut", "easeBack", "lerp", "moodColor", "rgba", "roundRect", "starPath", "draw", "drawEyes",
-  "drawEyeShape", "drawBadge", "drawParticles", "drawDizzyStars", "eyeFor", "emoteWeight"];
+  "drawEyeShape", "drawBadge", "drawParticles", "drawDizzyStars", "eyeFor", "emoteWeight", "outfitColor", "drawOutfit", "drawGlasses"];
 const missing = wanted.filter((name) => !functions.some((fn) => fn.name === name));
 if (missing.length > 0) throw new Error(`Hommie.qml is missing ${missing.join(", ")}`);
 const engineCode = functions.filter((fn) => wanted.includes(fn.name)).map((fn) => fn.code).join("\n\n");
@@ -66,12 +69,12 @@ const engineCode = functions.filter((fn) => wanted.includes(fn.name)).map((fn) =
 // Tokyo Night, as the shell themes it.
 const theme = {
   bg: "#16161e", card: "#1a1b26", border: "#292e42", title: "#c0caf5", subtitle: "#7982a9", label: "#a9b1d6",
-  accent: "#7aa2f7", working: "#0db9d7", warning: "#eb927b", success: "#b9f27c", error: "#ff7a93",
+  accent: "#7aa2f7", working: "#0db9d7", warning: "#eb927b", success: "#b9f27c", error: "#ff7a93", text: "#c0caf5",
 };
 
 // Each card freezes the engine at one moment. `mood` sets the colour, eyes,
 // and badge; the rest overrides the animated state.
-const cards = [
+const moodCards = [
   { label: "No pending items", mood: "idle" },
   { label: "Agents working…", mood: "working", s: { snakeOn: 1, snakeAt: 9 } },
   { label: "Rate limited", mood: "ratelimit", particles: [{ type: "sweat", x: 0.05, y: -0.95, vx: 0, vy: 0, age: 0.4, life: 1.6, rot: 0, size: 0.18 }] },
@@ -95,6 +98,26 @@ const cards = [
   { label: "Yawns when idle", mood: "idle", emote: "yawn", s: { sx: 0.97, sy: 1.06 } },
 ];
 
+const outfitCards = [
+  { label: "Party hat", mood: "idle", outfit: "party" },
+  { label: "Beanie", mood: "working", outfit: "beanie", s: { snakeOn: 1, snakeAt: 9 } },
+  { label: "Crown", mood: "finished", outfit: "crown" },
+  { label: "Santa hat (December)", mood: "idle", outfit: "santa" },
+  { label: "Pumpkin (late October)", mood: "idle", outfit: "pumpkin" },
+  { label: "Bow", mood: "question", outfit: "bow", s: { tilt: 0.12 } },
+  { label: "Glasses", mood: "idle", outfit: "glasses", s: { eyeX: 0.4 } },
+  { label: "Sunglasses", mood: "idle", outfit: "sunglasses" },
+  { label: "Scarf", mood: "sleeping", outfit: "scarf" },
+  { label: "Party hat + approval", mood: "approval", outfit: "party", s: { oy: -0.03 } },
+  { label: "Santa hat, dizzy", mood: "idle", outfit: "santa", emote: "dizzy", s: { tilt: -0.1 }, clock: 1.1 },
+  { label: "Beanie, rate limited", mood: "ratelimit", outfit: "beanie" },
+];
+const cards = outfitSheet ? outfitCards : moodCards;
+const heading = outfitSheet ? "Hommie's wardrobe" : "Hommie";
+const subheading = outfitSheet
+  ? "right-click him to pick an outfit, or leave it on Auto for the seasons"
+  : "watches Claude Code, Codex, OpenCode, Omacode, Gemini CLI, Antigravity and Grok from your Omarchy desktop";
+
 const html = `<!doctype html>
 <html><head><meta charset="utf-8"><style>
   * { margin: 0; box-sizing: border-box; }
@@ -104,22 +127,23 @@ const html = `<!doctype html>
   .grid { display: grid; grid-template-columns: repeat(4, 340px); gap: 20px 40px; justify-content: center; margin-top: 34px; }
   .card { position: relative; height: 210px; background: ${theme.card}; border: 2px solid ${theme.border}; border-radius: 14px; }
   .card.expression { border-style: dashed; }
-  canvas { position: absolute; left: 50%; transform: translate(-50%, -50%); top: 88px; }
+  canvas { position: absolute; left: 50%; transform: translate(-50%, -50%); top: ${outfitSheet ? 100 : 88}px; }
   .label { position: absolute; left: 0; right: 0; bottom: 20px; text-align: center; color: ${theme.label}; font-size: 19px; letter-spacing: 0.5px; }
 </style></head><body>
-<h1>Hommie</h1>
-<p class="sub">watches Claude Code, Codex, OpenCode, Omacode, Gemini CLI, Antigravity and Grok from your Omarchy desktop</p>
+<h1>${heading}</h1>
+<p class="sub">${subheading}</p>
 <div class="grid" id="grid"></div>
 <script>
 const theme = ${JSON.stringify(theme)};
 const cards = ${JSON.stringify(cards)};
 const hex = (value) => ({ r: parseInt(value.slice(1, 3), 16) / 255, g: parseInt(value.slice(3, 5), 16) / 255, b: parseInt(value.slice(5, 7), 16) / 255 });
-const Color = { accent: hex(theme.accent), popups: { background: hex(theme.card) } };
+const Color = { accent: hex(theme.accent), foreground: hex(theme.text), popups: { background: hex(theme.card) } };
 const statusColors = { working: hex(theme.working), warning: hex(theme.warning), error: hex(theme.error), success: hex(theme.success), attention: hex(theme.accent) };
 const states = ${engineValue(qml, "states")};
 const mark = ${engineValue(qml, "mark")};
 const zGlyph = ${engineValue(qml, "zGlyph")};
 const emoteLengths = ${engineValue(qml, "emoteLengths")};
+const outfitGlyphs = ${engineValue(qml, "outfitGlyphs")};
 const grid = 15;
 const innerPath = (() => {
   const path = []; let i;
@@ -145,11 +169,11 @@ for (const card of cards) {
   const size = 118;
   const root = { overhang: Math.round(size * 0.45) };
   const E = {
-    root, mark, grid, innerPath, outerCells, zGlyph, states, emoteLengths,
+    root, mark, grid, innerPath, outerCells, zGlyph, states, emoteLengths, outfitGlyphs, outfitName: card.outfit ?? "",
     state: card.mood, cfg: states[card.mood], clock: card.clock ?? 0.5,
     badge: states[card.mood].badge, badgeColor: null, particles: card.particles ?? [],
     emote: card.emote ? { name: card.emote, start: 0, length: emoteLengths[card.emote] } : null,
-    s: Object.assign({ eyeX: 0, eyeY: 0, tilt: 0, open: 1, sx: 1, sy: 1, oy: 0, ox: 0, badgeS: 1, snakeAt: 0, snakeOn: 0 }, card.s ?? {}),
+    s: Object.assign({ eyeX: 0, eyeY: 0, tilt: 0, open: 1, sx: 1, sy: 1, oy: 0, ox: 0, badgeS: 1, snakeAt: 0, snakeOn: 0, outfitS: 1 }, card.s ?? {}),
   };
   const engine = makeEngine(E, Color, statusColors);
   const tone = card.color ? statusColors[card.color] : engine.moodColor(card.mood);
@@ -158,7 +182,7 @@ for (const card of cards) {
   if (card.emote) E.clock = card.clock ?? emoteLengths[card.emote] * 0.5;
 
   const element = document.createElement("div");
-  element.className = "card" + (card.emote ? " expression" : "");
+  element.className = "card" + (card.emote && !card.outfit ? " expression" : "");
   const canvas = document.createElement("canvas");
   const scale = 2;
   const W = size + root.overhang * 2;

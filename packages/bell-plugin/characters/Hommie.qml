@@ -13,6 +13,8 @@ import ".."
 //   property real lookX    -1 (left) … 1 (right); where the eyes point
 //   property real lookY    -1 (up) … 1 (down)
 //   property bool running  false pauses the frame loop
+//   property string outfit optional: "" or an accessory (party, beanie, crown,
+//                          santa, pumpkin, bow, glasses, sunglasses, scarf)
 //   function poke()        reaction to a click
 //   function emote(name)   optional: play a short emote (greet, celebrate,
 //                          dizzy, wink, yawn, look); returns false when the
@@ -26,6 +28,7 @@ Item {
   property real lookX: 0
   property real lookY: 0
   property bool running: true
+  property string outfit: ""
 
   implicitWidth: 96
   implicitHeight: 96
@@ -34,8 +37,10 @@ Item {
   function emote(name) { return engine.startEmote(String(name)) }
 
   onMoodChanged: engine.setState(mood)
+  onOutfitChanged: engine.setOutfit(outfit)
   Component.onCompleted: {
     engine.setState(mood, true)
+    engine.setOutfit(outfit)
     engine.startEmote("greet")
   }
 
@@ -117,7 +122,7 @@ Item {
     }
 
     property var s: ({
-      eyeX: 0, eyeY: 0, tilt: 0, open: 1, sx: 1, sy: 1, oy: 0, ox: 0, badgeS: 0, snakeAt: 0, snakeOn: 0,
+      eyeX: 0, eyeY: 0, tilt: 0, open: 1, sx: 1, sy: 1, oy: 0, ox: 0, badgeS: 0, snakeAt: 0, snakeOn: 0, outfitS: 0,
       col: [0.6, 0.8, 0.4]
     })
     property var cfg: states.idle
@@ -129,6 +134,112 @@ Item {
     property real clock: Math.random() * 5
     property real nextBlink: 1.5 + Math.random() * 2
     property real lastAmbient: 0
+
+    // --- outfits -------------------------------------------------------------
+    // Pixel-art accessories in the mark's own grid (one cell = one mark cell),
+    // drawn inside the body transform so they tilt, squash, and hop with him.
+    // Hats sit on the top edge, the scarf wraps the bottom edge, and glasses
+    // follow the eyes. Cells: a accent, w warning, e error, s success,
+    // k working, f text, i tile ink; "." is empty.
+    readonly property var outfitGlyphs: ({
+      party: { at: "top", rows: ["...w...", "...w...", "..eae..", "..aea..", ".eaeae.", ".aeaea.", "eaeaeae", "aeaeaea"] },
+      beanie: { at: "top", rows: [".....w.....", "...aaaaa...", ".aaaaaaaaa.", ".aaaaaaaaa.", "akakakakaka", "kakakakakak"] },
+      crown: { at: "top", rows: ["w...w...w", "ww.www.ww", "wwwwwwwww", "wewwswwew", "wwwwwwwww"] },
+      santa: { at: "top", dx: 0.5, rows: ["..........ff", "........eeff", "......eeee..", "....eeeeee..", "..eeeeeeee..", ".eeeeeeeeee.", "ffffffffffff"] },
+      pumpkin: { at: "top", rows: ["....s....", "...s.....", ".wwwwwww.", "wwiwwwiww", "wwwwwwwww", "wiwiwiwiw", ".wwwwwww."] },
+      bow: { at: "top", dx: 4, rows: ["ee...ee", "eeeweee", "ee...ee"] },
+      scarf: { at: "neck", rows: ["eeeeeeeeeeeeeeeee", "eeeeeeeeeeeeeeeee", "..ee.............", "..ff............."] },
+      glasses: { at: "eyes" },
+      sunglasses: { at: "eyes" }
+    })
+    property string outfitName: ""
+
+    function setOutfit(next) {
+      next = outfitGlyphs[next] ? String(next) : ""
+      if (next === outfitName && (next === "" || s.outfitS > 0)) return
+      // Shrink the old one away, then pop the new one in.
+      anim("outfitS", [[0, 110, easeInOut]], function() {
+        outfitName = next
+        if (next !== "") anim("outfitS", [[1, 320, easeBack]])
+      })
+    }
+
+    function outfitColor(cell) {
+      switch (cell) {
+        case "a": return rgba(Color.accent)
+        case "w": return rgba(statusColors.warning)
+        case "e": return rgba(statusColors.error)
+        case "s": return rgba(statusColors.success)
+        case "k": return rgba(statusColors.working)
+        case "f": return rgba(Color.foreground)
+        default: return rgba(Color.popups.background)
+      }
+    }
+
+    function drawOutfit(ctx, u) {
+      var outfit = outfitGlyphs[outfitName]
+      if (!outfit || s.outfitS < 0.01) return
+      ctx.save()
+      if (outfit.at === "eyes") {
+        drawGlasses(ctx, u, outfitName === "sunglasses")
+        ctx.restore()
+        return
+      }
+      var rows = outfit.rows
+      var width = rows[0].length * u
+      var x0 = 7.5 * u - width / 2 + (outfit.dx || 0) * u
+      // Hats rest on the tile's top edge; the scarf covers the bottom row.
+      var anchorY = outfit.at === "neck" ? 13.8 * u : -0.35 * u
+      var y0 = outfit.at === "neck" ? anchorY : anchorY - rows.length * u
+      ctx.translate(7.5 * u, anchorY)
+      ctx.scale(s.outfitS, s.outfitS)
+      ctx.translate(-7.5 * u, -anchorY)
+      // One path per colour, like the mark, so neighbouring cells leave no seams.
+      var colours = {}
+      for (var row = 0; row < rows.length; row++) {
+        for (var col = 0; col < rows[row].length; col++) {
+          var cell = rows[row].charAt(col)
+          if (cell !== ".") (colours[cell] = colours[cell] || []).push([col, row])
+        }
+      }
+      for (var colour in colours) {
+        ctx.beginPath()
+        var cells = colours[colour]
+        for (var i = 0; i < cells.length; i++) ctx.rect(x0 + cells[i][0] * u, y0 + cells[i][1] * u, u + 0.01, u + 0.01)
+        ctx.fillStyle = outfitColor(colour)
+        ctx.fill()
+      }
+      ctx.restore()
+    }
+
+    // Glasses ride the eyes, a little behind them, so they stay on his face.
+    function drawGlasses(ctx, u, shades) {
+      var gx = 7.5 * u + s.eyeX * u * 1.2
+      var gy = 6.24 * u + s.eyeY * u * 1.2
+      ctx.translate(gx, gy)
+      ctx.scale(s.outfitS, s.outfitS)
+      ctx.lineWidth = u * 0.35
+      ctx.strokeStyle = rgba(Color.foreground)
+      for (var side = -1; side <= 1; side += 2) {
+        if (shades) {
+          roundRect(ctx, side * u * 1.6 - u * 1.25, -u * 0.85, u * 2.5, u * 1.7, u * 0.5)
+          ctx.fillStyle = rgba(s.col)
+          ctx.fill()
+          ctx.fillStyle = rgba(Color.popups.background, 0.7)
+          ctx.fillRect(side * u * 1.6 - u * 0.75, -u * 0.5, u * 0.45, u * 0.3)
+        } else {
+          ctx.beginPath()
+          ctx.arc(side * u * 1.6, 0, u * 1.25, 0, Math.PI * 2, false)
+          ctx.stroke()
+        }
+      }
+      // Bridge between the lenses.
+      ctx.beginPath()
+      ctx.moveTo(-u * 0.35, -u * 0.15)
+      ctx.lineTo(u * 0.35, -u * 0.15)
+      ctx.strokeStyle = shades ? rgba(s.col) : rgba(Color.foreground)
+      ctx.stroke()
+    }
 
     // --- emotes --------------------------------------------------------------
     // Short overlays on top of the mood: they change the eyes, tilt, and
@@ -445,6 +556,7 @@ Item {
       }
 
       drawEyes(ctx, u)
+      drawOutfit(ctx, u)
       ctx.restore()
 
       if (badge !== "" && s.badgeS > 0.01) drawBadge(ctx, R, cx - R * 0.95 * s.sx, cy - R * 0.95 * s.sy)
