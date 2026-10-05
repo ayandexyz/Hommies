@@ -698,8 +698,11 @@ Gemini CLI, Antigravity, or Grok Build hook receives, start the agent with
 translated to:
 
 ```sh
-HOMMIES_HOOK_LOG=/tmp/hommies-hooks.jsonl grok
+HOMMIES_HOOK_LOG="$HOME/.local/state/hommies-hooks.jsonl" grok
 ```
 
-The log holds prompts and code, so it is off unless you set the variable.
+The log holds prompts and code, so it is off unless you set the variable. Keep
+it in a directory only you can write to. The hook creates it owner-only (0600)
+and refuses to write to a symlink, to a file another user owns, or to a file
+that group or others can read.
 
