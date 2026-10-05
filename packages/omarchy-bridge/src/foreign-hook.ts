@@ -6,7 +6,7 @@
  * only: permission prompts stay in the agent's own UI, so the hooks never
  * return a decision.
  */
-import { appendFileSync } from "node:fs";
+import { appendPrivateFile } from "./safe-file.js";
 
 import {
   agentProcess, isActivityEvent, isTurnEvent, postToBridge, readConnection, readStdin, reportActivity, reportFailure, reportTurn,
@@ -360,13 +360,15 @@ export function translateAntigravity(payload: unknown, event: string | undefined
  * Opt-in: with HOMMIES_HOOK_LOG set (in the agent's environment), each hook
  * appends what it received and what it translated it to. For debugging new
  * agent versions; never on by default, since payloads carry prompts and code.
+ * The log is owner-only: an existing symlink, another user's file, or a file
+ * group or others can read is refused (see appendPrivateFile).
  */
 function debugLog(provider: ForeignProvider, input: string, event: TranslatedEvent | null): void {
   const file = process.env.HOMMIES_HOOK_LOG;
   if (!file) return;
   try {
     const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => key.startsWith("GROK_")));
-    appendFileSync(file, `${JSON.stringify({ time: new Date().toISOString(), provider, argv: process.argv.slice(2), env, input, event })}\n`, { mode: 0o600 });
+    appendPrivateFile(file, `${JSON.stringify({ time: new Date().toISOString(), provider, argv: process.argv.slice(2), env, input, event })}\n`);
   } catch {
     // Debugging must never break the hook.
   }

@@ -2,9 +2,9 @@
  * Line counts for file edits, worked out in the adapter so only two numbers
  * reach the bridge: the edited text and file contents never leave the agent.
  */
-import { readFile, stat } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
 
+import { readRegularFile } from "./safe-file.js";
 import type { EditStats } from "./types.js";
 
 /** Larger files are not read; `Write` then counts its new lines only. */
@@ -63,14 +63,8 @@ export function patchStats(patch: string): EditStats | null {
   return { added, removed };
 }
 
-async function readSmallFile(path: string): Promise<string | null> {
-  try {
-    if ((await stat(path)).size > maxFileBytes) return null;
-    return await readFile(path, "utf8");
-  } catch {
-    return null;
-  }
-}
+/** The whole file when it is a regular file of at most `maxFileBytes`, checked on the open descriptor. */
+const readSmallFile = (path: string): Promise<string | null> => readRegularFile(path, maxFileBytes, "whole");
 
 function occurrences(text: string, search: string): number {
   if (search.length === 0) return 0;

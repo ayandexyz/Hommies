@@ -1,5 +1,5 @@
 /** Read-only helpers over Claude Code's JSONL session transcripts. */
-import { open } from "node:fs/promises";
+import { readRegularFile } from "./safe-file.js";
 
 /** Transcripts grow for the whole session; recent entries are near the end. */
 const tailBytes = 256 * 1024;
@@ -43,21 +43,9 @@ export function sessionTitle(transcript: string): string | null {
   return title.length > maxTitleLength ? `${title.slice(0, maxTitleLength - 3)}...` : title;
 }
 
+/** A bounded read of a regular file; a FIFO or device path yields null instead of blocking. */
 async function readRange(path: string | undefined, from: "head" | "tail", bytes: number): Promise<string | null> {
-  if (typeof path !== "string" || path.length === 0) return null;
-  try {
-    const file = await open(path, "r");
-    try {
-      const { size } = await file.stat();
-      const length = Math.min(size, bytes);
-      const buffer = Buffer.alloc(length);
-      await file.read(buffer, 0, length, from === "tail" ? size - length : 0);
-      // A partial first or last line is cut mid-JSON; callers skip it.
-      return buffer.toString("utf8");
-    } finally {
-      await file.close();
-    }
-  } catch {
-    return null;
-  }
+  if (typeof path !== "string") return null;
+  // A partial first or last line is cut mid-JSON; callers skip it.
+  return readRegularFile(path, bytes, from);
 }
