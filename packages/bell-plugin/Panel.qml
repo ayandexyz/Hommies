@@ -50,15 +50,8 @@ Panel {
       anchors.centerIn: parent
       spacing: Style.spacing.controlGap
 
-      ProviderLogo {
-        anchors.verticalCenter: parent.verticalCenter
-        providerId: providerTab.providerId
-        tint: providerTab.selected
-          ? Style.selectedStateColor(providerTab.foreground, providerTab.accent)
-          : providerTab.foreground
-        fontFamily: providerTab.fontFamily
-      }
-
+      // Text only: the agent's name and its pending count. The floating card
+      // keeps the logos.
       Text {
         textFormat: Text.PlainText
         anchors.verticalCenter: parent.verticalCenter
