@@ -36,9 +36,11 @@ Panel {
   component ProviderTab: Button {
     id: providerTab
 
-    required property string providerId
-    required property string providerName
-    required property int pendingCount
+    // Not `required`: the tabs are Repeater delegates, and a required property
+    // stops QML from injecting `modelData` (see SessionRow).
+    property string providerId: ""
+    property string providerName: ""
+    property int pendingCount: 0
 
     text: ""
     implicitHeight: tabContent.implicitHeight + Style.spacing.controlPaddingY * 2
@@ -48,15 +50,8 @@ Panel {
       anchors.centerIn: parent
       spacing: Style.spacing.controlGap
 
-      ProviderLogo {
-        anchors.verticalCenter: parent.verticalCenter
-        providerId: providerTab.providerId
-        tint: providerTab.selected
-          ? Style.selectedStateColor(providerTab.foreground, providerTab.accent)
-          : providerTab.foreground
-        fontFamily: providerTab.fontFamily
-      }
-
+      // Text only: the agent's name and its pending count. The floating card
+      // keeps the logos.
       Text {
         textFormat: Text.PlainText
         anchors.verticalCenter: parent.verticalCenter
@@ -262,7 +257,7 @@ Panel {
   function providerName(provider) {
     return provider === "codex" ? "Codex" : provider === "opencode" ? "OpenCode"
       : provider === "omacode" ? "Omacode" : provider === "gemini" ? "Gemini"
-      : provider === "antigravity" ? "Antigravity" : provider === "grok" ? "Grok"
+      : provider === "antigravity" ? "Agy" : provider === "grok" ? "Grok"
       : provider === "other" ? "Other"
       : provider === "claude" ? "Claude" : String(provider || "Agent")
   }

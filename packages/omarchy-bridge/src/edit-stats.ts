@@ -92,7 +92,23 @@ const text = (input: Readonly<Record<string, unknown>>, ...keys: string[]): stri
  * Takes Claude's snake_case and OpenCode's camelCase argument names. Reads the
  * target file only for `Write` and `replace_all` edits, and only when it is small.
  */
-export async function editStats(toolName: string, toolInput: unknown, cwd?: string): Promise<EditStats | null> {
+/** One old/new replacement: Claude `Edit`, OpenCode `edit`, Gemini CLI `replace`, Grok `search_replace`, Antigravity `replace_file_content`. */
+const replaceTools = new Set(["edit", "replace", "search_replace", "replace_file_content"]);
+/** Several replacements in one file: Claude `MultiEdit`, Antigravity `multi_replace_file_content`. */
+const multiReplaceTools = new Set(["multiedit", "multi_replace_file_content"]);
+/** A whole file: Claude and OpenCode `Write`, Gemini CLI `write_file`, Antigravity `write_to_file`. */
+const writeTools = new Set(["write", "write_file", "write_to_file"]);
+
+export interface EditStatsOptions {
+  /**
+   * The tool already ran (Antigravity reports tools after the fact), so the
+   * file on disk holds the new content: a write that replaced a file cannot be
+   * counted, and a new file is all additions.
+   */
+  readonly afterRun?: boolean;
+}
+
+export async function editStats(toolName: string, toolInput: unknown, cwd?: string, options: EditStatsOptions = {}): Promise<EditStats | null> {
   if (toolInput === null || typeof toolInput !== "object") return null;
   const input = toolInput as Readonly<Record<string, unknown>>;
   const tool = toolName.toLowerCase();
@@ -105,14 +121,28 @@ export async function editStats(toolName: string, toolInput: unknown, cwd?: stri
     const after = text(edit, "new_string", "newString");
     if (before === null || after === null) return null;
     const stats = lineDiff(before, after);
-    if (edit.replace_all !== true && edit.replaceAll !== true) return stats;
-    const contents = await fileText();
+    // Gemini CLI says how many occurrences it expects to replace.
+    const expected = typeof edit.expected_replacements === "number" && Number.isSafeInteger(edit.expected_replacements) && edit.expected_replacements > 1
+      ? edit.expected_replacements : 1;
+    if (edit.replace_all !== true && edit.replaceAll !== true) return { added: stats.added * expected, removed: stats.removed * expected };
+    // After the run the old text is gone from the file, so it counts once.
+    const contents = options.afterRun ? null : await fileText();
     const times = contents === null ? 1 : Math.max(1, occurrences(contents, before));
     return { added: stats.added * times, removed: stats.removed * times };
   };
 
-  if (tool === "edit") return replace(input, current);
-  if (tool === "multiedit") {
+  const write = async (content: string): Promise<EditStats> => {
+    if (!options.afterRun) return lineDiff((await current()) ?? "", content);
+    return lineDiff("", content);
+  };
+
+  // Grok's search_replace creates a file when old_string is empty.
+  if (tool === "search_replace" && text(input, "old_string", "oldString") === "") {
+    const content = text(input, "new_string", "newString");
+    return content === null ? null : write(content);
+  }
+  if (replaceTools.has(tool)) return replace(input, current);
+  if (multiReplaceTools.has(tool)) {
     if (!Array.isArray(input.edits)) return null;
     let contents: Promise<string | null> | undefined;
     const fileText = (): Promise<string | null> => (contents ??= current());
@@ -127,10 +157,12 @@ export async function editStats(toolName: string, toolInput: unknown, cwd?: stri
     }
     return { added, removed };
   }
-  if (tool === "write") {
+  if (writeTools.has(tool)) {
     const content = text(input, "content");
     if (content === null) return null;
-    return lineDiff((await current()) ?? "", content);
+    // After the run, an overwrite's old content is gone: no honest count.
+    if (options.afterRun && input.overwrite === true) return null;
+    return write(content);
   }
   // Codex `apply_patch` (also run through its shell tool) and OpenCode `patch`.
   const patch = text(input, "patch", "patchText", "input", "command");

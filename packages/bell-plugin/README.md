@@ -107,6 +107,9 @@ The widget setting **Answer agent questions in** controls question ownership:
 - **Top bar** keeps the PreToolUse hook open and returns the selected options to Claude.
   OpenCode and Omacode questions show in both the bar and the agent's TUI; whichever
   answers first wins, and the other one clears.
+  Antigravity and Grok questions wait for the bar too; your answer reaches the
+  agent's model as the reason its question tool was skipped. Codex questions stay
+  read-only (its hooks cannot carry an answer).
 - **Claude CLI** (the stored value keeps its original name) lets the agent render its
   native prompt while the top bar shows a read-only structured mirror, which clears
   once the question is answered.

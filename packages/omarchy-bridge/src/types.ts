@@ -301,7 +301,7 @@ export interface ActivityHookInput extends AgentProcessFields {
   readonly session_id: string;
   readonly cwd?: string;
   readonly session_title?: string;
-  readonly hook_event_name: "SessionStart" | "PreToolUse" | "PostToolUseFailure" | "SubagentStart" | "SubagentStop";
+  readonly hook_event_name: "SessionStart" | "PreToolUse" | "PostToolUseFailure" | "SubagentStart" | "SubagentStop" | "StopCancelled";
   readonly tool_name?: string;
   readonly tool_input?: Readonly<Record<string, unknown>>;
   /** Line counts when `PreToolUse` is a file edit; computed by the adapter. */

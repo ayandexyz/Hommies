@@ -6,8 +6,10 @@
  * only: permission prompts stay in the agent's own UI, so the hooks never
  * return a decision.
  */
+import { appendFileSync } from "node:fs";
+
 import {
-  isActivityEvent, isTurnEvent, readConnection, readStdin, reportActivity, reportFailure, reportTurn,
+  agentProcess, isActivityEvent, isTurnEvent, postToBridge, readConnection, readStdin, reportActivity, reportFailure, reportTurn,
   type ActivityHookEvent, type FailureHookEvent,
 } from "./hook-common.js";
 
@@ -31,8 +33,10 @@ const argumentAliases: Readonly<Record<string, string>> = {
   query: "query", searchquery: "query",
   url: "url",
   description: "description",
-  // Kept for edit line counts.
+  // Kept for edit line counts (Antigravity's names map onto Claude's).
   oldstring: "old_string", newstring: "new_string", content: "content", replaceall: "replace_all", edits: "edits",
+  targetcontent: "old_string", replacementcontent: "new_string", codecontent: "content", allowmultiple: "replace_all",
+  replacementchunks: "edits", overwrite: "overwrite", expectedreplacements: "expected_replacements",
 };
 
 /** Renames tool arguments to the snake_case fields the bridge labels steps with. */
@@ -41,7 +45,9 @@ export function normalizeToolInput(input: unknown): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(input)) {
     const alias = argumentAliases[key.toLowerCase().replace(/[_-]/g, "")];
-    if (alias !== undefined && !(alias in out)) out[alias] = value;
+    if (alias === undefined || alias in out) continue;
+    // Each chunk of a multi-replace gets the same renaming.
+    out[alias] = alias === "edits" && Array.isArray(value) ? value.map(normalizeToolInput) : value;
   }
   return out;
 }
@@ -74,15 +80,22 @@ export function translateGemini(payload: unknown): TranslatedEvent | null {
   }
 }
 
+/** Grok's own snake_case event names (`pre_tool_use`) as Claude's (`PreToolUse`). */
+const pascalEvent = (name: string | undefined): string | undefined =>
+  name?.split("_").map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join("");
+
 /**
- * Grok Build uses Claude's event names with camelCase fields
- * (`hookEventName`, `sessionId`, `toolName`, ...), and also sets
- * `GROK_HOOK_EVENT` and `GROK_SESSION_ID`. snake_case fields are accepted too.
+ * Grok Build sends every field twice, camelCase and Claude's snake_case. The
+ * event name differs between them: `hook_event_name` is Claude's PascalCase
+ * (`PreToolUse`), while `hookEventName` and `GROK_HOOK_EVENT` are Grok's own
+ * snake_case (`pre_tool_use`). Events from inside a subagent carry
+ * `subagentType` and are skipped: they are not the session's own turn.
  */
 export function translateGrok(payload: unknown, env: Readonly<Record<string, string | undefined>>): TranslatedEvent | null {
   if (!isObject(payload)) return null;
-  const pick = (camel: string, snake: string): unknown => payload[camel] ?? payload[snake];
-  const event = str(pick("hookEventName", "hook_event_name")) ?? str(env.GROK_HOOK_EVENT);
+  if (str(payload.subagentType) !== undefined) return null;
+  const pick = (camel: string, snake: string): unknown => payload[snake] ?? payload[camel];
+  const event = str(payload.hook_event_name) ?? pascalEvent(str(payload.hookEventName) ?? str(env.GROK_HOOK_EVENT));
   const base = {
     session_id: str(pick("sessionId", "session_id")) ?? str(env.GROK_SESSION_ID),
     cwd: str(payload.cwd) ?? str(pick("workspaceRoot", "workspace_root")) ?? str(env.GROK_WORKSPACE_ROOT),
@@ -92,13 +105,20 @@ export function translateGrok(payload: unknown, env: Readonly<Record<string, str
     case "SessionEnd":
       return { ...base, hook_event_name: event };
     case "PreToolUse":
-    case "PostToolUseFailure":
-      return { ...base, hook_event_name: event, tool_name: str(pick("toolName", "tool_name")) ?? "Tool", tool_input: normalizeToolInput(pick("toolInput", "tool_input")) };
+    case "PostToolUseFailure": {
+      const tool = str(pick("toolName", "tool_name")) ?? "Tool";
+      // The `question` hook entry reports this one; a step here would clear the question it posts.
+      if (tool === "ask_user_question" && event === "PreToolUse") return null;
+      return { ...base, hook_event_name: event, tool_name: tool, tool_input: normalizeToolInput(pick("toolInput", "tool_input")) };
+    }
     case "UserPromptSubmit": {
       const prompt = pick("prompt", "prompt");
       return { ...base, hook_event_name: event, ...(typeof prompt === "string" ? { prompt } : {}) };
     }
     case "Stop": {
+      // A second Stop fires at session end (`reason: "shutdown"`); only `end_turn` ends a turn.
+      const reason = str(payload.reason);
+      if (reason !== undefined && reason !== "end_turn") return null;
       const message = str(pick("lastAssistantMessage", "last_assistant_message"));
       return {
         ...base,
@@ -112,15 +132,203 @@ export function translateGrok(payload: unknown, env: Readonly<Record<string, str
       const details = str(pick("errorDetails", "error_details"));
       return { ...base, hook_event_name: event, error: error ?? "unknown", ...(details === undefined ? {} : { error_details: details }) };
     }
+    case "StopCancelled":
+      // An interrupted or declined turn: no finished item, but the session is no longer busy.
+      return { ...base, hook_event_name: event };
     default:
       return null;
   }
 }
 
 /**
+ * The text of Antigravity's final reply this turn, from its
+ * `transcript_full.jsonl`: the last model response without tool calls after
+ * the last user message.
+ */
+export function lastAntigravityText(transcript: string): string | null {
+  const lines = transcript.split("\n");
+  for (let index = lines.length - 1; index >= 0; index--) {
+    let entry: unknown;
+    try { entry = JSON.parse(lines[index] ?? ""); } catch { continue; }
+    if (!isObject(entry)) continue;
+    if (entry.type === "USER_INPUT") return null;
+    const calls = Array.isArray(entry.tool_calls) ? entry.tool_calls : [];
+    const content = str(entry.content)?.trim();
+    if (entry.source === "MODEL" && entry.type === "PLANNER_RESPONSE" && calls.length === 0 && content) return content;
+  }
+  return null;
+}
+
+/**
+ * Antigravity's `ask_question` call as a Claude AskUserQuestion hook body, or
+ * null for any other tool. Its options are plain strings and its multi-select
+ * flag is `is_multi_select`.
+ */
+export function antigravityQuestion(payload: unknown): Record<string, unknown> | null {
+  if (!isObject(payload) || !isObject(payload.toolCall) || payload.toolCall.name !== "ask_question") return null;
+  const args = isObject(payload.toolCall.args) ? payload.toolCall.args : {};
+  const raw = Array.isArray(args.questions) ? args.questions : [];
+  const questions = raw.flatMap((question: unknown, index: number) => {
+    if (!isObject(question)) return [];
+    const options = (Array.isArray(question.options) ? question.options : [])
+      .filter((option: unknown): option is string => typeof option === "string" && option.length > 0)
+      .map((label: string) => ({ label }));
+    return [{
+      question: str(question.question) ?? `Question ${index + 1}`,
+      header: raw.length > 1 ? `Question ${index + 1}` : "Question",
+      options,
+      multiSelect: question.is_multi_select === true,
+    }];
+  });
+  const session = str(payload.conversationId);
+  if (questions.length === 0 || session === undefined) return null;
+  const workspaces = Array.isArray(payload.workspacePaths) ? payload.workspacePaths : [];
+  const cwd = str(workspaces[0]);
+  return {
+    hook_event_name: "PreToolUse",
+    session_id: session,
+    ...(cwd === undefined ? {} : { cwd }),
+    tool_name: "AskUserQuestion",
+    tool_use_id: `${session}:${typeof payload.stepIdx === "number" ? payload.stepIdx : Date.now()}`,
+    tool_input: { questions },
+  };
+}
+
+/**
+ * The hook's reply once the bar answered: a deny whose reason carries the
+ * answers. Antigravity shows the model the reason, so it continues with them
+ * instead of asking again. Null (allow) when there is nothing to relay.
+ */
+export function antigravityAnswerReply(reply: unknown): { decision: "deny"; reason: string } | null {
+  if (!isObject(reply) || !Array.isArray(reply.answers)) return null;
+  const lines = reply.answers.flatMap((entry: unknown) => {
+    if (!isObject(entry)) return [];
+    const answer = str(entry.answer)?.trim();
+    return answer ? [`- ${str(entry.question) ?? "Question"} \u2192 ${answer}`] : [];
+  });
+  if (lines.length === 0) return null;
+  return {
+    decision: "deny",
+    reason: [
+      "The user already answered this in Hommies (their desktop agent bar), so the question was not shown again:",
+      ...lines,
+      "Continue with these answers. Do not ask the question again.",
+    ].join("\n"),
+  };
+}
+
+/**
+ * Grok Build's `ask_user_question` (PreToolUse, from the `question` hook
+ * entry) as a Claude AskUserQuestion hook body, or null for any other tool.
+ * Grok's options already carry `label` and `description`.
+ */
+export function grokQuestion(payload: unknown, env: Readonly<Record<string, string | undefined>>): Record<string, unknown> | null {
+  if (!isObject(payload) || str(payload.subagentType) !== undefined) return null;
+  if ((str(payload.tool_name) ?? str(payload.toolName)) !== "ask_user_question") return null;
+  const input = isObject(payload.tool_input) ? payload.tool_input : isObject(payload.toolInput) ? payload.toolInput : {};
+  const raw = Array.isArray(input.questions) ? input.questions : [];
+  const questions = raw.flatMap((question: unknown, index: number) => {
+    if (!isObject(question)) return [];
+    const options = (Array.isArray(question.options) ? question.options : []).flatMap((option: unknown) => {
+      if (!isObject(option) || !str(option.label)) return [];
+      return [{ label: str(option.label), ...(str(option.description) ? { description: str(option.description) } : {}) }];
+    });
+    return [{
+      question: str(question.question) ?? `Question ${index + 1}`,
+      header: raw.length > 1 ? `Question ${index + 1}` : "Question",
+      options,
+      multiSelect: question.multi_select === true || question.multiSelect === true,
+    }];
+  });
+  const session = str(payload.session_id) ?? str(payload.sessionId) ?? str(env.GROK_SESSION_ID);
+  if (questions.length === 0 || session === undefined) return null;
+  const cwd = str(payload.cwd) ?? str(payload.workspaceRoot);
+  return {
+    hook_event_name: "PreToolUse",
+    session_id: session,
+    ...(cwd === undefined ? {} : { cwd }),
+    tool_name: "AskUserQuestion",
+    tool_use_id: str(payload.tool_use_id) ?? str(payload.toolUseId) ?? `${session}:${Date.now()}`,
+    tool_input: { questions },
+  };
+}
+
+/**
+ * Grok's reply once the bar answered: a deny whose reason uses the same words
+ * as Grok's own answered-questions tool result, so the model treats it as the
+ * answer. Null (no output, i.e. allow) when there is nothing to relay.
+ */
+export function grokAnswerReply(reply: unknown): { decision: "deny"; reason: string } | null {
+  if (!isObject(reply) || !Array.isArray(reply.answers)) return null;
+  const entries = reply.answers.flatMap((entry: unknown) => {
+    if (!isObject(entry)) return [];
+    const answer = str(entry.answer)?.trim();
+    return answer ? [`"${str(entry.question) ?? "Question"}"="${answer}"`] : [];
+  });
+  if (entries.length === 0) return null;
+  return {
+    decision: "deny",
+    reason: `User has answered your questions: ${entries.join(", ")}. You can now continue with the user's answers in mind. ` +
+      "(They answered in Hommies, their desktop agent bar, so the question was not shown again. Do not ask it again.)",
+  };
+}
+
+interface QuestionRelay {
+  readonly provider: "antigravity" | "grok";
+  readonly toBody: (payload: unknown) => Record<string, unknown> | null;
+  readonly toReply: (bridgeReply: unknown) => Record<string, unknown> | null;
+  /** What to print when nothing is relayed; null prints nothing. */
+  readonly allow: Record<string, unknown> | null;
+}
+
+/**
+ * A question tool's PreToolUse (Antigravity's `ask_question`, Grok's
+ * `ask_user_question`). Neither agent lets a hook fill in answers, so with the
+ * top-bar answer surface the bridge holds the hook until the bar answers and
+ * the hook denies the call with the answers as the reason, which the model
+ * reads. Otherwise, and whenever anything fails, the call is allowed and the
+ * agent asks in its own UI. Every other tool keeps the agent's permission flow.
+ */
+export async function runQuestionRelayHook(relay: QuestionRelay): Promise<void> {
+  let output = relay.allow;
+  try {
+    const input = await readStdin();
+    let payload: unknown;
+    try { payload = JSON.parse(input); } catch { return; }
+    const body = relay.toBody(payload);
+    debugLog(relay.provider, input, null);
+    if (body === null) return;
+    const connection = await readConnection();
+    if (connection === null) return;
+    // Matches the bridge's wait for an answer (5 minutes) plus a margin.
+    const reply = await postToBridge(connection, `/v1/providers/${relay.provider}/question`, JSON.stringify({ ...body, ...await agentProcess() }), 5 * 60 * 1000 + 5_000);
+    if (reply.ok) {
+      let parsed: unknown = null;
+      try { parsed = JSON.parse(reply.text); } catch { parsed = null; }
+      output = relay.toReply(parsed) ?? output;
+    }
+  } catch {
+    // The bar is optional; the agent still asks in its own UI.
+  } finally {
+    if (output !== null) process.stdout.write(`${JSON.stringify(output)}\n`);
+  }
+}
+
+/** Antigravity's `ask_question`; its PreToolUse must always print a decision. */
+export const runAntigravityQuestionHook = (): Promise<void> => runQuestionRelayHook({
+  provider: "antigravity", toBody: antigravityQuestion, toReply: antigravityAnswerReply, allow: { decision: "allow" },
+});
+
+/** Grok's `ask_user_question`; silence means allow. */
+export const runGrokQuestionHook = (): Promise<void> => runQuestionRelayHook({
+  provider: "grok", toBody: (payload) => grokQuestion(payload, process.env), toReply: grokAnswerReply, allow: null,
+});
+
+/**
  * Antigravity does not name the event in its payload, so setup passes it as
- * the hook's first argument. Only `PostToolUse` and `Stop` are hooked:
- * `PreToolUse` must answer with a permission decision, and the invocation
+ * the hook's first argument. `PostToolUse` and `Stop` are reported here;
+ * `PreToolUse` is hooked only for `ask_question` (runAntigravityQuestionHook),
+ * since for other tools its answer is a permission decision. The invocation
  * events fire on every model call rather than once per prompt.
  */
 export function translateAntigravity(payload: unknown, event: string | undefined): TranslatedEvent | null {
@@ -134,6 +342,7 @@ export function translateAntigravity(payload: unknown, event: string | undefined
       ...base,
       // A finished tool call is reported as a step; a failed one as `(failed)`.
       hook_event_name: error === undefined ? "PreToolUse" : "PostToolUseFailure",
+      tool_already_ran: true,
       tool_name: str(call.name) ?? "Tool",
       tool_input: normalizeToolInput(call.args),
     };
@@ -147,11 +356,29 @@ export function translateAntigravity(payload: unknown, event: string | undefined
   return null;
 }
 
+/**
+ * Opt-in: with HOMMIES_HOOK_LOG set (in the agent's environment), each hook
+ * appends what it received and what it translated it to. For debugging new
+ * agent versions; never on by default, since payloads carry prompts and code.
+ */
+function debugLog(provider: ForeignProvider, input: string, event: TranslatedEvent | null): void {
+  const file = process.env.HOMMIES_HOOK_LOG;
+  if (!file) return;
+  try {
+    const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => key.startsWith("GROK_")));
+    appendFileSync(file, `${JSON.stringify({ time: new Date().toISOString(), provider, argv: process.argv.slice(2), env, input, event })}\n`, { mode: 0o600 });
+  } catch {
+    // Debugging must never break the hook.
+  }
+}
+
 export interface ForeignHookOptions {
   readonly provider: ForeignProvider;
   readonly translate: (payload: unknown) => TranslatedEvent | null;
   /** Gemini CLI and Antigravity read a JSON object from stdout on every hook. */
   readonly printJson: boolean;
+  /** The final reply when a Stop payload does not carry it, e.g. from the agent's transcript. */
+  readonly finalMessage?: (payload: unknown) => Promise<string | null>;
 }
 
 /** Reads the agent's payload, reports it, and never blocks or decides anything. */
@@ -161,6 +388,7 @@ export async function runForeignHook(options: ForeignHookOptions): Promise<void>
     let payload: unknown;
     try { payload = JSON.parse(input); } catch { return; }
     const event = options.translate(payload);
+    debugLog(options.provider, input, event);
     if (event === null || typeof event.session_id !== "string") return;
     const connection = await readConnection();
     if (connection === null) return;
@@ -169,8 +397,8 @@ export async function runForeignHook(options: ForeignHookOptions): Promise<void>
     if (event.hook_event_name === "StopFailure") return await reportFailure(route, event, connection, null);
     if (isTurnEvent(event.hook_event_name)) {
       await reportTurn(route, event, connection, {
-        // No transcript format to read: a Stop without its final message is still a finished turn.
-        lastAssistantText: async () => "Turn finished.",
+        // A Stop without a readable final message is still a finished turn.
+        lastAssistantText: async () => (await options.finalMessage?.(payload).catch(() => null)) ?? "Turn finished.",
         sessionTitle: async () => null,
       });
     }

@@ -51,6 +51,8 @@ export interface FailureHookEvent extends TurnHookEvent {
 export interface ActivityHookEvent extends TurnHookEvent {
   readonly tool_name?: string;
   readonly tool_input?: unknown;
+  /** Set by adapters whose agent reports tools after they ran (Antigravity); never sent. */
+  readonly tool_already_ran?: boolean;
   /** Sent on SubagentStart and SubagentStop. */
   readonly agent_id?: string;
   readonly agent_type?: string;
@@ -68,6 +70,7 @@ export function isActivityEvent(event: ActivityHookEvent): boolean {
   if (event.hook_event_name === "SessionStart") return true;
   // Observational: they never block, so they must not reach the permission path.
   if (event.hook_event_name === "SubagentStart" || event.hook_event_name === "SubagentStop") return true;
+  if (event.hook_event_name === "StopCancelled") return true;
   return (event.hook_event_name === "PreToolUse" || event.hook_event_name === "PostToolUseFailure") &&
     event.tool_name !== "AskUserQuestion";
 }
@@ -248,7 +251,7 @@ export async function reportActivity(
   }
   // Only the line counts are sent; the edited text stays in this process.
   const edit = event.hook_event_name === "PreToolUse" && typeof event.tool_name === "string"
-    ? await editStats(event.tool_name, event.tool_input, event.cwd).catch(() => null)
+    ? await editStats(event.tool_name, event.tool_input, event.cwd, { afterRun: event.tool_already_ran === true }).catch(() => null)
     : null;
   const body = {
     hook_event_name: event.hook_event_name,

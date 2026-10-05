@@ -331,6 +331,10 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     if (request.method === "POST" && url.pathname === "/v1/providers/codex/question") {
       return await receiveCodexQuestion(response, await readJson<ClaudeQuestionHookInput>(request), state);
     }
+    const relayed = /^\/v1\/providers\/(antigravity|grok)\/question$/.exec(url.pathname);
+    if (request.method === "POST" && relayed) {
+      return await receiveRelayedQuestion(response, await readJson<ClaudeQuestionHookInput>(request), relayed[1] as RelayProvider, state);
+    }
     if (request.method === "POST" && url.pathname === "/v1/providers/claude/question/resolved") {
       return resolveClaudeQuestion(response, await readJson<ClaudeQuestionHookInput>(request), state);
     }
@@ -377,7 +381,7 @@ function receiveStop(response: ServerResponse, input: ClaudeTurnHookInput, provi
   const kind = question === null ? "finished" : "attention";
   const summary = question ?? summarizeFinishedTurn(input.last_assistant_message);
   const message = finalMessage(input.last_assistant_message, summary);
-  if (provider === "codex") dropCodexQuestions(state, input.session_id);
+  if (mirrorsQuestions(provider)) dropMirroredQuestions(state, input.session_id);
   // A subagent still running in the background keeps the session busy after the turn ends.
   const running = state.sessions.get(input.session_id)?.subagents.size ?? 0;
   trackSession(state, provider, input.session_id, {
@@ -450,7 +454,7 @@ function receiveResume(response: ServerResponse, input: ClaudeTurnHookInput, pro
     throw new Error("invalid resume payload");
   }
   clearAttention(state, input.session_id);
-  if (provider === "codex") dropCodexQuestions(state, input.session_id);
+  if (mirrorsQuestions(provider)) dropMirroredQuestions(state, input.session_id);
   if (input.hook_event_name === "SessionEnd") dropSession(state, input.session_id);
   else {
     const prompt = typeof input.prompt === "string" ? oneLine(input.prompt, 80) : "";
@@ -479,12 +483,22 @@ function receiveActivity(response: ServerResponse, input: ActivityHookInput, pro
     case "PreToolUse":
       // A new tool call means the agent is no longer waiting on a turn-end reply.
       clearAttention(state, input.session_id);
-      if (provider === "codex") dropCodexQuestions(state, input.session_id);
+      if (mirrorsQuestions(provider)) dropMirroredQuestions(state, input.session_id);
       trackSession(state, provider, input.session_id, {
         process: input, cwd: input.cwd, sessionTitle: input.session_title, state: "working", step: describeStep(tool, toolInput), turnEnded: false,
         edit: validEditStats(input.edit),
       });
       break;
+    case "StopCancelled": {
+      // The turn ended without completing (Grok's Ctrl+C, a declined permission):
+      // nothing to review, but the session is idle again unless subagents still run.
+      const running = state.sessions.get(input.session_id)?.subagents.size ?? 0;
+      trackSession(state, provider, input.session_id, {
+        process: input, cwd: input.cwd, sessionTitle: input.session_title,
+        state: running > 0 ? "working" : "idle", turnEnded: true, step: "(interrupted)",
+      });
+      break;
+    }
     case "SubagentStart":
     case "SubagentStop": {
       // Observational only: a subagent stopping never clears the session's turn-end item.
@@ -671,6 +685,10 @@ async function receiveQuestion(
     });
     if (answers === null) return sendJson(response, 200, {});
     if (hasRequestIds(provider)) return sendJson(response, 200, { answers: openCodeAnswers(questions, answers) });
+    // These hooks cannot rewrite the tool input; they relay the answers to the model instead.
+    if (relaysAnswers(provider)) {
+      return sendJson(response, 200, { answers: questions.map((question) => ({ question: question.question, answer: String(answers[question.id] ?? "") })) });
+    }
     return sendJson(response, 200, { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "allow", updatedInput: { ...input.tool_input, answers } } });
   } else throw new Error("invalid Claude question hook payload");
 }
@@ -687,18 +705,52 @@ async function receiveCodexQuestion(response: ServerResponse, input: ClaudeQuest
   ) {
     throw new Error("invalid Codex question hook payload");
   }
-  dropCodexQuestions(state, input.session_id);
+  dropMirroredQuestions(state, input.session_id);
   return receiveQuestion(response, { ...input, tool_name: "AskUserQuestion" }, "codex", state, "cli");
 }
 
+/** Agents whose question hooks cannot fill in answers but can deny the call with a reason. */
+type RelayProvider = "antigravity" | "grok";
+function relaysAnswers(provider: Provider): provider is RelayProvider {
+  return provider === "antigravity" || provider === "grok";
+}
+
 /**
- * Codex sends no hook when its question is answered; its next tool call, turn
- * end, or prompt in that session means it was.
+ * Antigravity's `ask_question` and Grok's `ask_user_question` (PreToolUse),
+ * already in AskUserQuestion's shape. Their hooks cannot rewrite the tool
+ * input, so with the top-bar answer surface the bridge holds the hook until
+ * the bar answers and returns `{ answers }`: the hook then denies the call
+ * with the answers as the reason, which the model reads. With the CLI surface
+ * it is mirrored read-only and the agent's own UI asks.
  */
-function dropCodexQuestions(state: BridgeState, sessionId: string): boolean {
+async function receiveRelayedQuestion(response: ServerResponse, input: ClaudeQuestionHookInput, provider: RelayProvider, state: BridgeState): Promise<void> {
+  if (
+    !input || input.hook_event_name !== "PreToolUse" || input.tool_name !== "AskUserQuestion" ||
+    typeof input.session_id !== "string" || typeof input.tool_use_id !== "string" ||
+    input.tool_input === null || typeof input.tool_input !== "object"
+  ) {
+    throw new Error("invalid question hook payload");
+  }
+  dropMirroredQuestions(state, input.session_id);
+  return receiveQuestion(response, input, provider, state);
+}
+
+/**
+ * Agents whose hooks send no event when a question is answered in the agent's
+ * own UI, so their next tool call or turn end clears it from the bar.
+ */
+function mirrorsQuestions(provider: Provider): boolean {
+  return provider === "codex" || relaysAnswers(provider);
+}
+
+/**
+ * Codex, Antigravity, and Grok send no hook when a mirrored question is answered;
+ * their next tool call, turn end, or prompt in that session means it was.
+ */
+function dropMirroredQuestions(state: BridgeState, sessionId: string): boolean {
   let dropped = false;
   for (const [id, question] of state.questions) {
-    if (question.provider !== "codex" || String(question.item.threadId) !== sessionId) continue;
+    if (!mirrorsQuestions(question.provider) || String(question.item.threadId) !== sessionId) continue;
     dropped = dropQuestion(state, id) || dropped;
   }
   return dropped;

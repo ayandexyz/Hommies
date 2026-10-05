@@ -350,11 +350,18 @@ Panel {
     return String(steps[steps.length - 1]) + (edit ? "  " + editLabel(edit) : "")
   }
 
+  /**
+   * How many steps the open session lists: at least 5, and more (up to the
+   * bridge's 20) while the agent rail leaves the card taller than its content.
+   * Set by the body's `fitSteps()`.
+   */
+  property int stepLimit: 5
+
   /** The open session's latest steps, newest last, as `{ text, edit }`. */
   function recentSteps(thread) {
     var steps = thread && thread.activity && thread.activity.steps ? thread.activity.steps : []
     var result = []
-    for (var index = Math.max(0, steps.length - 5); index < steps.length; index++) {
+    for (var index = Math.max(0, steps.length - stepLimit); index < steps.length; index++) {
       result.push({ text: String(steps[index]), edit: stepEdit(thread, index) })
     }
     return result
@@ -675,11 +682,40 @@ Panel {
         width: parent.width
         implicitHeight: Math.max(providerTabs.implicitHeight, sessionColumn.implicitHeight)
 
+        // The card is as tall as the agent rail; fill the space it leaves
+        // under a session with more of its steps instead of a gap. Run after
+        // layout settles (callLater), so a changed limit cannot loop.
+        function fitSteps() {
+          if (!root.openThread) {
+            root.stepLimit = 5
+            return
+          }
+          var shown = root.recentSteps(root.openThread).length
+          var spare = providerTabs.implicitHeight - sessionColumn.implicitHeight
+          var rowHeight = stepProbe.implicitHeight + Style.space(2)
+          var next = Math.max(5, Math.min(20, shown + Math.floor(spare / Math.max(1, rowHeight))))
+          if (next !== root.stepLimit) root.stepLimit = next
+        }
+        Connections {
+          target: root
+          function onOpenThreadChanged() { Qt.callLater(content.fitSteps) }
+        }
+
+        // Measures one step row (same font as the step list).
+        Text {
+          id: stepProbe
+          visible: false
+          text: "Ag"
+          font.family: root.bar ? root.bar.fontFamily : Style.font.family
+          font.pixelSize: Style.font.caption
+        }
+
         // Vertical rail of logo-only provider tabs.
         Column {
           id: providerTabs
           width: Style.space(40)
           spacing: Style.space(6)
+          onImplicitHeightChanged: Qt.callLater(content.fitSteps)
 
           Repeater {
             model: root.showOtherTab ? root.shownProviders.concat(["other"]) : root.shownProviders
@@ -705,6 +741,7 @@ Panel {
           anchors.leftMargin: Style.space(10)
           anchors.right: parent.right
           spacing: Style.space(8)
+          onImplicitHeightChanged: Qt.callLater(content.fitSteps)
 
           Text {
             textFormat: Text.PlainText
