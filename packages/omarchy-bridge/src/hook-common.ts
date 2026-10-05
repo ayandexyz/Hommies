@@ -70,7 +70,7 @@ export function isActivityEvent(event: ActivityHookEvent): boolean {
   if (event.hook_event_name === "SessionStart") return true;
   // Observational: they never block, so they must not reach the permission path.
   if (event.hook_event_name === "SubagentStart" || event.hook_event_name === "SubagentStop") return true;
-  if (event.hook_event_name === "StopCancelled") return true;
+  if (event.hook_event_name === "StopCancelled" || event.hook_event_name === "Interrupt") return true;
   return (event.hook_event_name === "PreToolUse" || event.hook_event_name === "PostToolUseFailure") &&
     event.tool_name !== "AskUserQuestion";
 }

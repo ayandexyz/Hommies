@@ -84,7 +84,7 @@ test("the compiled Codex hook reads the rollout and session index", async () => 
   });
 });
 
-test("the compiled Codex hook mirrors request_user_input read-only until Codex moves on", async () => {
+test("the compiled Codex hook mirrors request_user_input read-only until Codex answers it", async () => {
   await withServer({}, async ({ request, dataDir }) => {
     const env = { HOMMIES_DATA_DIR: dataDir, CODEX_HOME: join(dataDir, "codex") };
     const stdout = await runHook("codex-hook.js", { hook_event_name: "PreToolUse", session_id: "q1", cwd: "/w/app",
@@ -100,10 +100,35 @@ test("the compiled Codex hook mirrors request_user_input read-only until Codex m
     assert.equal(item?.summary, "Which planet has the most moons?");
     assert.deepEqual(item?.questions?.[0]?.options.map((option) => option.label), ["Saturn", "Jupiter"]);
 
-    await runHook("codex-hook.js", { hook_event_name: "PreToolUse", session_id: "q1", cwd: "/w/app",
-      tool_name: "exec_command", tool_use_id: "call_2", tool_input: { cmd: "ls" } }, env);
+    await runHook("codex-hook.js", { hook_event_name: "PostToolUse", session_id: "q1", cwd: "/w/app",
+      tool_name: "request_user_input", tool_use_id: "call_1", tool_input: {}, tool_response: { moons: "Saturn" } }, env);
     const snapshot = await pending(request);
     assert.equal(snapshot.threads.flatMap((thread) => thread.items).filter((entry) => entry.kind === "question").length, 0);
+
+    await runHook("codex-hook.js", { hook_event_name: "PreToolUse", session_id: "q1", cwd: "/w/app",
+      turn_id: "t", tool_name: "request_user_input", tool_use_id: "call_2", tool_input: { questions: [{
+        id: "again", header: "Again", question: "Ask again?", options: [{ label: "Yes" }],
+      }] } }, env);
+    assert.equal((await pending(request)).totalCount, 1);
+    await runHook("codex-hook.js", { hook_event_name: "Interrupt", session_id: "q1", cwd: "/w/app" }, env);
+    assert.equal((await pending(request)).totalCount, 0, "interrupt clears a native prompt mirror");
+  });
+});
+
+test("the compiled Codex hook tracks subagents and clears work on interrupt", async () => {
+  await withServer({}, async ({ request, dataDir }) => {
+    const env = { HOMMIES_DATA_DIR: dataDir, CODEX_HOME: join(dataDir, "codex") };
+    const base = { session_id: "c-sub", cwd: "/w/app", turn_id: "t", model: "m", permission_mode: "default" };
+    await runHook("codex-hook.js", { ...base, hook_event_name: "SubagentStart", agent_id: "a1", agent_type: "Explore" }, env);
+    let session = (await pending(request)).sessions[0];
+    assert.equal(session.state, "working");
+    assert.equal(session.steps.at(-1), "Subagent Explore");
+
+    await runHook("codex-hook.js", { ...base, hook_event_name: "SubagentStop", agent_id: "a1", agent_type: "Explore" }, env);
+    await runHook("codex-hook.js", { ...base, hook_event_name: "Interrupt" }, env);
+    session = (await pending(request)).sessions[0];
+    assert.equal(session.state, "idle");
+    assert.deepEqual(session.steps.slice(-2), ["Subagent Explore finished", "(interrupted)"]);
   });
 });
 

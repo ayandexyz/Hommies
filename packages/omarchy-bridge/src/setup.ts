@@ -38,6 +38,8 @@ const CLAUDE_HOOKS: ReadonlyArray<HookSpec> = [
   { event: "PostToolUse", matcher: "AskUserQuestion" },
   { event: "PostToolUseFailure", matcher: "*", timeout: 5 },
   { event: "PermissionRequest", timeout: 305 },
+  { event: "Elicitation", matcher: "*", timeout: 305 },
+  { event: "ElicitationResult", matcher: "*", timeout: 5 },
   { event: "Stop", timeout: 5 },
   { event: "StopFailure", timeout: 5 },
   { event: "UserPromptSubmit", timeout: 5 },
@@ -50,10 +52,15 @@ const CLAUDE_HOOKS: ReadonlyArray<HookSpec> = [
 const CODEX_HOOKS: ReadonlyArray<HookSpec> = [
   { event: "SessionStart", timeout: 5 },
   { event: "PreToolUse", matcher: "*", timeout: 5 },
+  { event: "PostToolUse", matcher: "request_user_input", timeout: 5 },
   { event: "PermissionRequest", matcher: "*", timeout: 305 },
   { event: "Stop", timeout: 5 },
+  // Codex caps Interrupt hooks at 3 seconds.
+  { event: "Interrupt", timeout: 3 },
   { event: "UserPromptSubmit", timeout: 5 },
   { event: "SessionEnd", timeout: 5 },
+  { event: "SubagentStart", timeout: 5 },
+  { event: "SubagentStop", timeout: 5 },
 ];
 
 /**
@@ -107,8 +114,9 @@ export const hookCommand = (hookPath: string, ...args: string[]): string => {
 };
 
 /**
- * For agents that read a JSON object from every hook's stdout (Gemini CLI,
- * Antigravity): the hook prints `{}` itself, and a removed package prints it here.
+ * For agents that read a JSON object from every hook's stdout (Gemini CLI and
+ * Antigravity), a removed package prints `{}` here. The live hook emits its own
+ * event-specific object.
  */
 export const jsonHookCommand = (hookPath: string, ...args: string[]): string => {
   const path = shellQuote(hookPath);
@@ -222,8 +230,9 @@ export const mergeGrokHooks = (config: JsonObject, hookPath: string | null): Jso
  * Antigravity's `hooks.json` maps hook names to their events. We own the
  * `hommies` entry: it is replaced on install and removed on uninstall, and
  * the user's other entries are kept. Antigravity sends no event name, so each
- * command passes it as an argument. `PreToolUse` is hooked for `ask_question`
- * only, since for other tools its answer is a permission decision.
+ * command passes it as an argument. One `PreToolUse` entry sees every tool:
+ * the adapter handles `ask_question` and permission-sensitive calls, and
+ * returns an empty decision for read-only and coordination tools.
  */
 export function mergeAntigravityHooks(config: JsonObject, hookPath: string | null): JsonObject {
   if (hookPath === null && !(ANTIGRAVITY_HOOK_NAME in config)) return config;
@@ -233,9 +242,8 @@ export function mergeAntigravityHooks(config: JsonObject, hookPath: string | nul
     const handler = (event: string, timeout = 5): JsonObject => ({ type: "command", command: jsonHookCommand(hookPath, event), timeout });
     next[ANTIGRAVITY_HOOK_NAME] = {
       enabled: true,
-      // Only ask_question: the hook allows it and mirrors the question in the bar.
-      // Waits up to 5 minutes for an answer from the bar (timeouts are in seconds).
-      PreToolUse: [{ matcher: "^ask_question$", hooks: [handler("PreToolUse", 305)] }],
+      // Questions and permissions can both wait up to 5 minutes for the bar.
+      PreToolUse: [{ matcher: "*", hooks: [handler("PreToolUse", 305)] }],
       PostToolUse: [{ matcher: "*", hooks: [handler("PostToolUse")] }],
       Stop: [handler("Stop")],
     };

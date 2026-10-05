@@ -95,12 +95,12 @@ interface PendingQuestion {
   readonly timer: ReturnType<typeof setTimeout>;
 }
 
-type BuiltInProvider = "claude" | "codex" | "opencode" | "omacode" | ActivityOnlyProvider;
+type BuiltInProvider = "claude" | "codex" | "opencode" | "omacode" | LimitedProvider;
 /**
- * Agents whose hooks report live activity, turn ends, and failures only:
- * they have no hook that can answer a permission or question.
+ * Agents whose hooks do not expose the full Claude/OpenCode interaction set.
+ * Antigravity can answer questions and permissions; Grok can answer questions.
  */
-type ActivityOnlyProvider = "gemini" | "antigravity" | "grok";
+type LimitedProvider = "gemini" | "antigravity" | "grok";
 const builtInProviders: ReadonlyArray<BuiltInProvider> = ["claude", "codex", "opencode", "omacode", "gemini", "antigravity", "grok"];
 
 declare const customAgentBrand: unique symbol;
@@ -312,6 +312,9 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     if (request.method === "POST" && url.pathname === "/v1/providers/codex/permission") {
       return await receivePermission(response, await readJson<ClaudePermissionHookInput>(request), "codex", state);
     }
+    if (request.method === "POST" && url.pathname === "/v1/providers/antigravity/permission") {
+      return await receivePermission(response, await readJson<ClaudePermissionHookInput>(request), "antigravity", state);
+    }
     const inProcess = /^\/v1\/providers\/(opencode|omacode)\/(permission|question)(\/resolved)?$/.exec(url.pathname);
     if (request.method === "POST" && inProcess) {
       const provider = inProcess[1] as RequestIdProvider;
@@ -330,6 +333,9 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     }
     if (request.method === "POST" && url.pathname === "/v1/providers/codex/question") {
       return await receiveCodexQuestion(response, await readJson<ClaudeQuestionHookInput>(request), state);
+    }
+    if (request.method === "POST" && url.pathname === "/v1/providers/codex/question/resolved") {
+      return resolveCodexQuestion(response, await readJson<ClaudeQuestionHookInput>(request), state);
     }
     const relayed = /^\/v1\/providers\/(antigravity|grok)\/question$/.exec(url.pathname);
     if (request.method === "POST" && relayed) {
@@ -489,9 +495,11 @@ function receiveActivity(response: ServerResponse, input: ActivityHookInput, pro
         edit: validEditStats(input.edit),
       });
       break;
-    case "StopCancelled": {
-      // The turn ended without completing (Grok's Ctrl+C, a declined permission):
+    case "StopCancelled":
+    case "Interrupt": {
+      // The turn ended without completing (Grok/Codex Ctrl+C, a declined permission):
       // nothing to review, but the session is idle again unless subagents still run.
+      if (mirrorsQuestions(provider)) dropMirroredQuestions(state, input.session_id);
       const running = state.sessions.get(input.session_id)?.subagents.size ?? 0;
       trackSession(state, provider, input.session_id, {
         process: input, cwd: input.cwd, sessionTitle: input.session_title,
@@ -707,6 +715,11 @@ async function receiveCodexQuestion(response: ServerResponse, input: ClaudeQuest
   }
   dropMirroredQuestions(state, input.session_id);
   return receiveQuestion(response, { ...input, tool_name: "AskUserQuestion" }, "codex", state, "cli");
+}
+
+/** Codex finished its native request_user_input prompt, so remove the mirror. */
+function resolveCodexQuestion(response: ServerResponse, input: ClaudeQuestionHookInput, state: BridgeState): void {
+  return resolveClaudeQuestion(response, { ...input, tool_name: "AskUserQuestion" }, state);
 }
 
 /** Agents whose question hooks cannot fill in answers but can deny the call with a reason. */
@@ -997,11 +1010,13 @@ async function receivePermission(response: ServerResponse, input: ClaudePermissi
 
 /**
  * Codex rejects `updatedPermissions`, and Omacode only offers wider grants in
- * its own prompt, so only Claude (when it sent suggestions) and OpenCode can.
+ * its own prompt. Claude and Antigravity can apply their own suggestion shape;
+ * OpenCode has a first-class `always` reply.
  */
 function canAcceptAlways(provider: Provider, input: ClaudePermissionHookInput): boolean {
   if (provider === "opencode") return true;
-  return provider === "claude" && Array.isArray(input.permission_suggestions) && input.permission_suggestions.length > 0;
+  return (provider === "claude" || provider === "antigravity") &&
+    Array.isArray(input.permission_suggestions) && input.permission_suggestions.length > 0;
 }
 
 function permissionDecision(pending: PendingPermission, decision: NonNullable<PendingResponseInput["decision"]>): ClaudeHookDecision {
@@ -1128,7 +1143,7 @@ function parseQuestions(toolInput: Record<string, unknown>): PendingQuestionProm
       }];
     });
     return [{
-      id: question,
+      id: typeof value.id === "string" && value.id.length > 0 ? value.id : question,
       header: typeof value.header === "string" && value.header.length > 0
         ? value.header
         : `Question ${index + 1}`,

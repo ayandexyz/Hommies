@@ -90,7 +90,7 @@ export interface PendingQuestionOption {
 }
 
 export interface PendingQuestionPrompt {
-  /** Claude Code expects answers to be keyed by the full question text. */
+  /** Stable answer key: usually the full question text, or an MCP form property name. */
   readonly id: string;
   readonly header: string;
   readonly question: string;
@@ -105,7 +105,7 @@ export interface PendingItem {
   readonly kind: PendingItemKind;
   readonly summary: string;
   readonly createdAt: string;
-  /** Present for Claude AskUserQuestion, OpenCode, and Omacode question items. Optional for HTTP compatibility. */
+  /** Present for Claude questions and MCP elicitations, OpenCode, and Omacode. Optional for HTTP compatibility. */
   readonly questions?: ReadonlyArray<PendingQuestionPrompt>;
   /** The surface that owns the response; the other surface is display-only. */
   readonly answerSurface?: QuestionAnswerSurface;
@@ -122,7 +122,7 @@ export interface PendingItem {
   readonly message?: string;
   /**
    * Set on a `permission` item when `acceptAlways` would also stop the agent
-   * asking again: Claude with permission suggestions, and OpenCode.
+   * asking again: Claude or Antigravity with permission suggestions, and OpenCode.
    */
   readonly canAcceptAlways?: boolean;
 }
@@ -202,7 +202,8 @@ export interface PendingResponseInput {
   readonly requestId: ApprovalRequestId;
   /**
    * `acceptAlways` allows and remembers the rule: Claude applies its own
-   * permission suggestions, OpenCode replies `always`. Items without
+   * permission suggestions, Antigravity receives temporary permission
+   * overrides, and OpenCode replies `always`. Items without
    * `canAcceptAlways` treat it as `accept`.
    */
   readonly decision?: "accept" | "acceptAlways" | "decline" | "cancel";
@@ -301,7 +302,7 @@ export interface ActivityHookInput extends AgentProcessFields {
   readonly session_id: string;
   readonly cwd?: string;
   readonly session_title?: string;
-  readonly hook_event_name: "SessionStart" | "PreToolUse" | "PostToolUseFailure" | "SubagentStart" | "SubagentStop" | "StopCancelled";
+  readonly hook_event_name: "SessionStart" | "PreToolUse" | "PostToolUseFailure" | "SubagentStart" | "SubagentStop" | "StopCancelled" | "Interrupt";
   readonly tool_name?: string;
   readonly tool_input?: Readonly<Record<string, unknown>>;
   /** Line counts when `PreToolUse` is a file edit; computed by the adapter. */

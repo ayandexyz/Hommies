@@ -12,6 +12,14 @@ async function main(): Promise<void> {
   try { event = JSON.parse(input) as ActivityHookEvent; } catch { return; }
   const connection = await readConnection();
   if (connection === null) return;
+  if (event.hook_event_name === "PostToolUse" && event.tool_name === "request_user_input") {
+    try {
+      await postToBridge(connection, "/v1/providers/codex/question/resolved", JSON.stringify(event), 2_000);
+    } catch {
+      // The next tool, turn end, or interrupt also clears a stale mirror.
+    }
+    return;
+  }
   if (event.hook_event_name === "PreToolUse" && event.tool_name === "request_user_input") {
     // Mirrored read-only: Codex's hooks cannot answer this tool, so never block or write to stdout.
     try {

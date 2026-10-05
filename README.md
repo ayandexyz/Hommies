@@ -52,9 +52,11 @@ This is a pnpm workspace with two packages:
 
 Working end to end, not yet published to the plugin marketplace.
 
-- **Bridge** (`@thisisayande/hommies`): the HTTP API, the Claude Code and Codex
-  command hooks, the OpenCode plugin, the generic `hommies-hook`, desktop
-  notifications, sounds, and `hommies setup` are implemented and tested.
+- **Bridge** (`@thisisayande/hommies`): the HTTP API, command hooks for Claude
+  Code, Codex, Gemini CLI, Antigravity, and Grok Build, the OpenCode plugin,
+  the generic `hommies-hook`, desktop notifications, sounds, and `hommies
+  setup` are implemented and tested. Antigravity permissions and questions
+  and Claude MCP form elicitations can be answered from Hommies.
 - **Plugin**: the service starts the bridge, restarts it when it exits, and polls
   `/v1/pending` every 3 seconds. Hommie's card (and the bar bell's panel) answers
   permissions and questions and shows live activity, failures, and the jump-to-terminal

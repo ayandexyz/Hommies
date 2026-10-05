@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 /** Command-hook adapter for Claude Code questions, permissions, turn ends, failures, and live activity. */
+import { claudeElicitationQuestion, claudeElicitationReply, claudeElicitationResolved } from "./claude-elicitation.js";
 import {
   agentProcess, isActivityEvent, isTurnEvent, postToBridge, readConnection, readStdin, reportActivity, reportFailure, reportTurn,
   type ActivityHookEvent, type FailureHookEvent,
@@ -19,6 +20,33 @@ async function main(): Promise<void> {
   try { event = JSON.parse(input) as HookEvent; } catch { return; }
   const connection = await readConnection();
   if (connection === null) return;
+  if (event.hook_event_name === "Elicitation") {
+    const question = claudeElicitationQuestion(event);
+    if (question === null) return;
+    try {
+      const response = await postToBridge(connection, "/v1/providers/claude/question",
+        JSON.stringify({ ...question, ...await agentProcess() }), 5 * 60 * 1000 + 5_000);
+      if (!response.ok) return;
+      let reply: unknown = null;
+      try { reply = JSON.parse(response.text); } catch { reply = null; }
+      const output = claudeElicitationReply(event, reply);
+      if (output !== null) process.stdout.write(JSON.stringify(output));
+    } catch {
+      // Unsupported forms and bridge failures preserve Claude's native dialog.
+    }
+    return;
+  }
+  if (event.hook_event_name === "ElicitationResult") {
+    const resolved = claudeElicitationResolved(event);
+    if (resolved !== null) {
+      try {
+        await postToBridge(connection, "/v1/providers/claude/question/resolved", JSON.stringify(resolved), 2_000);
+      } catch {
+        // The bridge is optional.
+      }
+    }
+    return;
+  }
   if (isActivityEvent(event)) {
     await reportActivity("/v1/providers/claude", event, connection);
     return;

@@ -1,15 +1,15 @@
 #!/usr/bin/env node
 /**
- * Command hook for Antigravity (`agy`): tool steps and turn ends. Antigravity's
+ * Command hook for Antigravity (`agy`): questions, permissions, tool steps, and turn ends. Antigravity's
  * payload does not name the event, so setup passes it as the first argument
- * (`antigravity-hook.js PostToolUse`). Always prints `{}` (no decision).
+ * (`antigravity-hook.js PostToolUse`). Every invocation prints valid JSON.
  */
-import { lastAntigravityText, runAntigravityQuestionHook, runForeignHook, translateAntigravity } from "./foreign-hook.js";
+import { lastAntigravityText, runAntigravityPreToolHook, runForeignHook, translateAntigravity } from "./foreign-hook.js";
 import { readTranscriptTail } from "./transcript.js";
 
 const event = process.argv[2];
 if (event === "PreToolUse") {
-  void runAntigravityQuestionHook();
+  void runAntigravityPreToolHook();
 } else {
   void runForeignHook({
     provider: "antigravity",

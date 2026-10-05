@@ -99,7 +99,9 @@ plugin's contract with installed copies; preserve it.
   `requestId`, plus either `decision: accept|decline|cancel` or `answers`).
 - `POST /v1/preferences` — `BridgePreferencesInput`.
 - Provider hooks (POST): `/v1/providers/claude/{permission,question,question/resolved}`,
-  `/v1/providers/codex/permission`,
+  `/v1/providers/codex/{permission,question,question/resolved}`,
+  `/v1/providers/antigravity/{permission,question}`,
+  `/v1/providers/grok/question`,
   `/v1/providers/{opencode,omacode}/{permission,question,permission/resolved,question/resolved}`,
   `/v1/providers/{claude,codex,opencode,omacode}/{stop,resume}`.
 - `kind` values on `PendingItem`: `question | permission | attention | finished`.
@@ -141,6 +143,7 @@ exercise the HTTP surface end-to-end:
 
 - `permissions.test.mjs` — accept/decline/cancel and hook disconnect.
 - `question-surfaces.test.mjs` — topbar vs cli answer surfaces.
+- `claude-elicitation.test.mjs` — typed MCP form elicitations and native-dialog resolution.
 - `notifications.test.mjs` — desktop notification dispatch.
 - `stop-detection.test.mjs` — `detectReplyRequest` heuristic.
 - `codex.test.mjs`, `opencode.test.mjs`, `omacode.test.mjs` — provider

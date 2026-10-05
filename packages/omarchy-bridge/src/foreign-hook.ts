@@ -2,9 +2,8 @@
  * Shared code for the Gemini CLI, Antigravity, and Grok Build hooks. Each
  * agent names its events and fields differently; `translate*` maps a payload
  * onto the Claude-style event the rest of the bridge understands, and
- * `runForeignHook` reports it. These agents get live activity and turn ends
- * only: permission prompts stay in the agent's own UI, so the hooks never
- * return a decision.
+ * `runForeignHook` reports it. Antigravity also exposes blocking PreToolUse
+ * decisions, which let Hommies answer its questions and permission requests.
  */
 import { appendPrivateFile } from "./safe-file.js";
 
@@ -194,6 +193,108 @@ export function antigravityQuestion(payload: unknown): Record<string, unknown> |
   };
 }
 
+/** Built-ins that are observational or read-only and should keep native policy. */
+const antigravityNeutralTools = new Set([
+  "view_file",
+  "list_dir",
+  "find_by_name",
+  "grep_search",
+  "manage_task",
+  "schedule",
+  "list_permissions",
+  "invoke_subagent",
+  "define_subagent",
+  "send_message",
+  "manage_subagents",
+  "ask_question",
+]);
+
+/** A concise Claude-style label for the permission card. */
+function antigravityToolLabel(tool: string): string {
+  switch (tool) {
+    case "run_command": return "Bash";
+    case "write_to_file": return "Write";
+    case "replace_file_content":
+    case "multi_replace_file_content": return "Edit";
+    case "search_web": return "WebSearch";
+    case "read_url_content": return "WebFetch";
+    case "ask_permission": return "Permission";
+    case "generate_image": return "ImageGen";
+    default: return tool.startsWith("browser_") ? "Browser" : tool;
+  }
+}
+
+/** The temporary grant Antigravity accepts with an allow decision, when known. */
+function antigravityPermissionResource(tool: string, args: Json): string | null {
+  const value = (camel: string, lower: string): string | undefined => str(args[camel]) ?? str(args[lower]);
+  if (tool === "run_command") {
+    const command = value("CommandLine", "command");
+    return command === undefined ? null : `command(${command})`;
+  }
+  if (tool === "write_to_file" || tool === "replace_file_content" || tool === "multi_replace_file_content") {
+    const path = value("TargetFile", "target_file");
+    return path === undefined ? null : `write_file(${path})`;
+  }
+  if (tool === "read_url_content" || tool === "search_web") {
+    const raw = value("Url", "url") ?? value("domain", "domain");
+    if (raw === undefined) return null;
+    try { return `read_url(${new URL(raw).hostname || raw})`; } catch { return `read_url(${raw})`; }
+  }
+  if (tool.startsWith("browser_")) {
+    const raw = value("Url", "url") ?? value("domain", "domain");
+    if (raw === undefined) return null;
+    try { return `execute_url(${new URL(raw).hostname || raw})`; } catch { return `execute_url(${raw})`; }
+  }
+  if (tool === "ask_permission") {
+    const action = value("Action", "action");
+    const target = value("Target", "target");
+    return action === undefined || target === undefined ? null : `${action}(${target})`;
+  }
+  // Antigravity does not document the hook name shape for MCP tools. Cover
+  // the common provider/tool spellings without inventing a persistent scope.
+  if (tool.startsWith("mcp__")) {
+    const [server, ...parts] = tool.slice(5).split("__");
+    return server && parts.length > 0 ? `mcp(${server}/${parts.join("__")})` : null;
+  }
+  return null;
+}
+
+/**
+ * An Antigravity PreToolUse payload as the bridge's permission shape.
+ * Known read-only and coordination tools stay in Antigravity's native policy.
+ * Unknown tools are treated as custom/MCP tools because those default to Ask.
+ */
+export function antigravityPermission(payload: unknown): Record<string, unknown> | null {
+  if (!isObject(payload) || !isObject(payload.toolCall)) return null;
+  const tool = str(payload.toolCall.name);
+  const session = str(payload.conversationId);
+  if (tool === undefined || session === undefined || antigravityNeutralTools.has(tool)) return null;
+  const args = isObject(payload.toolCall.args) ? payload.toolCall.args : {};
+  const workspaces = Array.isArray(payload.workspacePaths) ? payload.workspacePaths : [];
+  const cwd = str(workspaces[0]) ?? str(args.Cwd) ?? str(args.cwd) ?? "";
+  const resource = antigravityPermissionResource(tool, args);
+  return {
+    hook_event_name: "PermissionRequest",
+    session_id: session,
+    cwd,
+    tool_name: antigravityToolLabel(tool),
+    tool_input: normalizeToolInput(args),
+    ...(resource === null ? {} : { permission_suggestions: [resource] }),
+  };
+}
+
+/** Maps the bridge's shared permission decision to Antigravity's hook contract. */
+export function antigravityPermissionReply(reply: unknown): Record<string, unknown> | null {
+  if (!isObject(reply) || !isObject(reply.hookSpecificOutput) || !isObject(reply.hookSpecificOutput.decision)) return null;
+  const decision = reply.hookSpecificOutput.decision;
+  if (decision.behavior === "deny") return { decision: "deny", reason: "The user denied this permission in Hommies." };
+  if (decision.behavior !== "allow") return null;
+  const grants = Array.isArray(decision.updatedPermissions)
+    ? decision.updatedPermissions.filter((entry: unknown): entry is string => typeof entry === "string" && entry.length > 0)
+    : [];
+  return { decision: "allow", ...(grants.length === 0 ? {} : { permissionOverrides: grants }) };
+}
+
 /**
  * The hook's reply once the bar answered: a deny whose reason carries the
  * answers. Antigravity shows the model the reason, so it continues with them
@@ -314,10 +415,41 @@ export async function runQuestionRelayHook(relay: QuestionRelay): Promise<void> 
   }
 }
 
-/** Antigravity's `ask_question`; its PreToolUse must always print a decision. */
-export const runAntigravityQuestionHook = (): Promise<void> => runQuestionRelayHook({
-  provider: "antigravity", toBody: antigravityQuestion, toReply: antigravityAnswerReply, allow: { decision: "allow" },
-});
+/**
+ * Antigravity has one PreToolUse surface for both questions and permissions.
+ * An empty decision preserves its native policy when Hommies has no opinion.
+ */
+export async function runAntigravityPreToolHook(): Promise<void> {
+  let output: Record<string, unknown> = { decision: "" };
+  try {
+    const input = await readStdin();
+    let payload: unknown;
+    try { payload = JSON.parse(input); } catch { return; }
+    debugLog("antigravity", input, null);
+    const question = antigravityQuestion(payload);
+    const permission = question === null ? antigravityPermission(payload) : null;
+    if (question === null && permission === null) return;
+    // ask_question is safe to run when the optional bridge is absent. Other
+    // calls keep the empty decision so Antigravity's own permission UI remains.
+    if (question !== null) output = { decision: "allow" };
+    const connection = await readConnection();
+    if (connection === null) return;
+    const route = question === null ? "permission" : "question";
+    const body = question ?? permission;
+    const reply = await postToBridge(connection, `/v1/providers/antigravity/${route}`,
+      JSON.stringify({ ...body, ...await agentProcess() }), 5 * 60 * 1000 + 5_000);
+    if (!reply.ok) return;
+    let parsed: unknown = null;
+    try { parsed = JSON.parse(reply.text); } catch { parsed = null; }
+    output = question === null
+      ? antigravityPermissionReply(parsed) ?? output
+      : antigravityAnswerReply(parsed) ?? output;
+  } catch {
+    // The bridge is optional; fall through to Antigravity's native UI.
+  } finally {
+    process.stdout.write(`${JSON.stringify(output)}\n`);
+  }
+}
 
 /** Grok's `ask_user_question`; silence means allow. */
 export const runGrokQuestionHook = (): Promise<void> => runQuestionRelayHook({
@@ -327,9 +459,9 @@ export const runGrokQuestionHook = (): Promise<void> => runQuestionRelayHook({
 /**
  * Antigravity does not name the event in its payload, so setup passes it as
  * the hook's first argument. `PostToolUse` and `Stop` are reported here;
- * `PreToolUse` is hooked only for `ask_question` (runAntigravityQuestionHook),
- * since for other tools its answer is a permission decision. The invocation
- * events fire on every model call rather than once per prompt.
+ * `PreToolUse` is handled by runAntigravityPreToolHook because its answer can
+ * be either a question relay or a permission decision. The invocation events
+ * fire on every model call rather than once per prompt.
  */
 export function translateAntigravity(payload: unknown, event: string | undefined): TranslatedEvent | null {
   if (!isObject(payload)) return null;

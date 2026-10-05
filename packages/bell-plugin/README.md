@@ -110,6 +110,10 @@ The widget setting **Answer agent questions in** controls question ownership:
   Antigravity and Grok questions wait for the bar too; your answer reaches the
   agent's model as the reason its question tool was skipped. Codex questions stay
   read-only (its hooks cannot carry an answer).
+- Antigravity permission-sensitive tools also wait for **Allow**, **Deny**, or,
+  when an exact temporary scope is available, **Always allow** in the widget.
+- Claude MCP form elicitations use the selected question surface when every
+  required field can be represented by the widget.
 - **Claude CLI** (the stored value keeps its original name) lets the agent render its
   native prompt while the top bar shows a read-only structured mirror, which clears
   once the question is answered.

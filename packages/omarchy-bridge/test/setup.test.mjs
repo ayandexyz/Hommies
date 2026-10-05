@@ -48,6 +48,8 @@ test("Claude hooks merge beside the user's own hooks and replace stale entries",
   assert.equal(next.hooks.SessionStart[0].hooks[0].timeout, 5);
   assert.equal(next.hooks.StopFailure[0].hooks[0].timeout, 5);
   assert.equal(next.hooks.PermissionRequest[0].hooks[0].timeout, 305);
+  assert.equal(next.hooks.Elicitation[0].hooks[0].timeout, 305);
+  assert.equal(next.hooks.ElicitationResult[0].hooks[0].timeout, 5);
   assert.deepEqual(mergeClaudeSettings(next, "node /new/hommies/dist/claude-hook.js"), next, "setup is idempotent");
   assert.deepEqual(mergeClaudeSettings(next, null), { model: "opus", hooks: { Stop: [userStop] } });
 });
@@ -122,5 +124,9 @@ test("a symlinked config is updated through the link", async () => {
     await runSetup({ ...install, providers: ["codex"] }, environment);
     const hooks = (await readJson(real)).hooks;
     assert.deepEqual(hooks.PermissionRequest, [{ matcher: "*", hooks: [{ type: "command", command: "test -f /opt/hommies/dist/codex-hook.js && node /opt/hommies/dist/codex-hook.js || true", timeout: 305 }] }]);
+    assert.equal(hooks.PostToolUse[0].matcher, "request_user_input");
+    assert.equal(hooks.Interrupt[0].hooks[0].timeout, 3, "Codex interrupts clear a busy session within Codex's timeout cap");
+    assert.ok(hooks.SubagentStart, "Codex subagents are tracked");
+    assert.ok(hooks.SubagentStop, "Codex subagent completion is tracked");
   });
 });

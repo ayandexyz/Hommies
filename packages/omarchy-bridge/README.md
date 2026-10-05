@@ -131,6 +131,8 @@ After installing `@thisisayande/hommies`, add this hook to `~/.claude/settings.j
     "PreToolUse": [{ "matcher": "*", "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/hommies/dist/claude-hook.js" }] }],
     "PostToolUse": [{ "matcher": "AskUserQuestion", "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/hommies/dist/claude-hook.js" }] }],
     "PostToolUseFailure": [{ "matcher": "*", "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/hommies/dist/claude-hook.js", "timeout": 5 }] }],
+    "Elicitation": [{ "matcher": "*", "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/hommies/dist/claude-hook.js", "timeout": 305 }] }],
+    "ElicitationResult": [{ "matcher": "*", "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/hommies/dist/claude-hook.js", "timeout": 5 }] }],
     "Stop": [{ "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/hommies/dist/claude-hook.js", "timeout": 5 }] }],
     "StopFailure": [{ "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/hommies/dist/claude-hook.js", "timeout": 5 }] }],
     "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/hommies/dist/claude-hook.js", "timeout": 5 }] }],
@@ -185,6 +187,13 @@ Claude questions retain all headers, options, descriptions, and multi-select
 metadata. In top-bar mode the hook waits for `/v1/respond`; in CLI mode it
 returns immediately and keeps a read-only mirror until PostToolUse or
 PostToolUseFailure closes the item.
+
+Claude MCP form elicitations use the same answer surface. Hommies supports
+required string, number, integer, boolean, and scalar-enum fields, preserves
+their JSON types in the response, and leaves optional fields optional. URL
+authentication and schemas the widget cannot represent stay in Claude's
+native dialog. `ElicitationResult` clears a read-only mirror when the native
+dialog answered first.
 
 `PreToolUse` and `PostToolUseFailure` match every tool: the hook blocks only
 for `AskUserQuestion` and reports every other tool call as
@@ -297,9 +306,9 @@ when no listed step is an edit. Adapters post to
 ```
 
 `hook_event_name` is `SessionStart`, `PreToolUse`, `PostToolUseFailure`,
-`SubagentStart`, `SubagentStop`, or `StopCancelled` (a turn that ended without
-completing: the session goes idle with an `(interrupted)` step and no
-finished item). A `PreToolUse` that edits a file may add
+`SubagentStart`, `SubagentStop`, `StopCancelled`, or `Interrupt` (a turn that
+ended without completing: the session goes idle with an `(interrupted)` step
+and no finished item). A `PreToolUse` that edits a file may add
 `"edit": { "added": 12, "removed": 3 }`; the bridge ignores it unless both are
 non-negative integers. The subagent events add `agent_id` (pairs the start
 with its stop) and `agent_type` (the name shown in the step); the subagent's
@@ -399,6 +408,10 @@ rule; the item then has `"canAcceptAlways": true`, and the panel sends
   "don't ask again" option would save (Claude picks where they are stored).
   The bar never invents rules.
 - **OpenCode**: the plugin replies `always` instead of `once`.
+- **Antigravity**: offered when the hook can derive an exact command, file,
+  host, or MCP tool scope. The bridge returns it as a temporary
+  `permissionOverrides` grant for the current conversation; the bar does not
+  create a wildcard grant when the payload is incomplete.
 - **Codex** rejects `updatedPermissions` in its hook output, and **Omacode**
   only offers wider grants in its own prompt, so neither gets the button.
 
@@ -464,12 +477,14 @@ permission requests from the bar, plain-text question and finished-turn
 detection (`Stop`), clearing on reply or session end (`UserPromptSubmit`,
 `SessionEnd`), session names from the `thread_name` in
 `$CODEX_HOME/session_index.jsonl`, [live activity](#live-activity) from
-`SessionStart` and `PreToolUse`, and desktop notifications. Codex's
+`SessionStart`, `PreToolUse`, `SubagentStart`, and `SubagentStop`, clearing a
+busy session on `Interrupt`, and desktop notifications. Codex's
 structured `request_user_input` tool (offered only in Plan mode) arrives
 through `PreToolUse` and is mirrored read-only in the bar whatever the answer
 surface preference, because Codex hooks cannot supply its answers: answer it
-in Codex. The mirror clears on the session's next tool call, `Stop`,
-`UserPromptSubmit`, or `SessionEnd`. In Default mode Codex asks in plain text,
+in Codex. `PostToolUse` clears the mirror as soon as that native prompt is
+answered; the next tool call, `Stop`, `Interrupt`, `UserPromptSubmit`, and
+`SessionEnd` are also cleanup paths. In Default mode Codex asks in plain text,
 which the `Stop` detection covers.
 
 Add these entries to `~/.codex/hooks.json`, preserving any existing hook
@@ -480,12 +495,16 @@ groups:
   "hooks": {
     "SessionStart": [{ "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/hommies/dist/codex-hook.js", "timeout": 5 }] }],
     "PreToolUse": [{ "matcher": "*", "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/hommies/dist/codex-hook.js", "timeout": 5 }] }],
+    "PostToolUse": [{ "matcher": "request_user_input", "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/hommies/dist/codex-hook.js", "timeout": 5 }] }],
     "PermissionRequest": [
       { "matcher": "*", "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/hommies/dist/codex-hook.js", "timeout": 305 }] }
     ],
     "Stop": [{ "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/hommies/dist/codex-hook.js", "timeout": 5 }] }],
+    "Interrupt": [{ "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/hommies/dist/codex-hook.js", "timeout": 3 }] }],
     "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/hommies/dist/codex-hook.js", "timeout": 5 }] }],
-    "SessionEnd": [{ "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/hommies/dist/codex-hook.js", "timeout": 5 }] }]
+    "SessionEnd": [{ "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/hommies/dist/codex-hook.js", "timeout": 5 }] }],
+    "SubagentStart": [{ "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/hommies/dist/codex-hook.js", "timeout": 5 }] }],
+    "SubagentStop": [{ "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/hommies/dist/codex-hook.js", "timeout": 5 }] }]
   }
 }
 ```
@@ -565,11 +584,11 @@ A headless `freecode run` never reports.
 ## Gemini CLI, Antigravity, and Grok Build
 
 These agents get [live activity](#live-activity), turn ends (`finished` and
-`attention` items), and, where the agent reports them, failed turns. Their
-hooks cannot answer a permission or a question, so those stay in the agent's
-own prompt, and the hooks never return a decision. Each one translates the
-agent's payload to Claude's events and posts to
-`/v1/providers/{gemini,antigravity,grok}/{activity,stop,resume,failure}`.
+`attention` items), and, where the agent reports them, failed turns.
+Antigravity also exposes blocking permission and question decisions; Grok
+exposes blocking questions. Gemini's current hook output remains
+observational. Each adapter translates the agent's payload to the bridge's
+shared events and posts to `/v1/providers/{gemini,antigravity,grok}/...`.
 `hommies setup` registers them; to do it by hand, use the entries below with
 the absolute path of the hook file in this package's `dist/`.
 
@@ -607,13 +626,15 @@ way, without the matcher. Gemini CLI may ask you to approve changed hooks.
 `hommies-antigravity-hook` (`dist/antigravity-hook.js`), as a `hommies` entry in
 `~/.gemini/config/hooks.json`, which is keyed by hook name. Antigravity's
 payload does not name the event, so each command passes it as an argument.
-Like Gemini CLI, Antigravity reads JSON from stdout and gets `{}`.
+Antigravity reads a JSON decision from stdout. The adapter returns an empty
+decision when Hommies has no opinion, preserving Antigravity's own permission
+policy and prompt.
 
 ```json
 {
   "hommies": {
     "enabled": true,
-    "PreToolUse": [{ "matcher": "^ask_question$", "hooks": [{ "type": "command", "command": "test -f /path/to/dist/antigravity-hook.js && node /path/to/dist/antigravity-hook.js PreToolUse || echo '{}'", "timeout": 5 }] }],
+    "PreToolUse": [{ "matcher": "*", "hooks": [{ "type": "command", "command": "test -f /path/to/dist/antigravity-hook.js && node /path/to/dist/antigravity-hook.js PreToolUse || echo '{}'", "timeout": 305 }] }],
     "PostToolUse": [{ "matcher": "*", "hooks": [{ "type": "command", "command": "test -f /path/to/dist/antigravity-hook.js && node /path/to/dist/antigravity-hook.js PostToolUse || echo '{}'", "timeout": 5 }] }],
     "Stop": [{ "type": "command", "command": "test -f /path/to/dist/antigravity-hook.js && node /path/to/dist/antigravity-hook.js Stop || echo '{}'", "timeout": 5 }]
   }
@@ -622,9 +643,15 @@ Like Gemini CLI, Antigravity reads JSON from stdout and gets `{}`.
 
 - `PostToolUse` adds a step once the tool has run (`(failed)` when it sent an
   `error`).
-- `PreToolUse` is hooked for `ask_question` only (timeout 305 s); every other
-  tool keeps Antigravity's own permission prompt. Its hooks cannot rewrite the
-  tool input, so an answer from the bar travels as a denial reason instead:
+- `PreToolUse` matches every tool and waits for at most 305 s. `run_command`,
+  file writes/edits, web and browser operations, `ask_permission`, image
+  generation, custom tools, and MCP tools become Hommies permission items.
+  **Allow** returns `allow`; **Deny** returns `deny`. **Always allow** is offered
+  only when the payload provides a precise temporary permission scope.
+  Known read-only and coordination tools return an empty decision immediately,
+  leaving Antigravity's native policy in charge.
+- `ask_question` uses the same hook. Its input cannot be rewritten, so an
+  answer from the bar travels as a denial reason instead:
   - **Top bar** surface: the hook waits for the bar. Once you answer, it replies
     `{"decision":"deny","reason":"The user already answered this in Hommies …
     Which color? → Blue …"}`. Antigravity skips its own prompt and the model
@@ -634,6 +661,9 @@ Like Gemini CLI, Antigravity reads JSON from stdout and gets `{}`.
   - **Claude CLI** surface: the question is mirrored read-only, the hook allows
     the call at once, and Antigravity's UI asks. It leaves the bar on
     Antigravity's next tool call or turn end.
+- If the bridge is unavailable, a permission is cancelled, or the wait times
+  out, the hook returns `{"decision":""}` so Antigravity shows its native
+  permission prompt.
 - `Stop` ends the turn when `fullyIdle` is not `false`. A `Stop` with an
   `error` is reported as a failed turn.
 - `PreInvocation` and `PostInvocation` run on every model call, not once per
@@ -705,4 +735,3 @@ The log holds prompts and code, so it is off unless you set the variable. Keep
 it in a directory only you can write to. The hook creates it owner-only (0600)
 and refuses to write to a symlink, to a file another user owns, or to a file
 that group or others can read.
-

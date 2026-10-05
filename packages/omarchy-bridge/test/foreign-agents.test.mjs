@@ -7,7 +7,8 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
-  antigravityAnswerReply, antigravityQuestion, grokAnswerReply, grokQuestion, lastAntigravityText, normalizeToolInput, translateAntigravity, translateGemini, translateGrok,
+  antigravityAnswerReply, antigravityPermission, antigravityPermissionReply, antigravityQuestion,
+  grokAnswerReply, grokQuestion, lastAntigravityText, normalizeToolInput, translateAntigravity, translateGemini, translateGrok,
 } from "../dist/foreign-hook.js";
 import { checkHooks, runSetup } from "../dist/setup.js";
 import { startBridgeServer } from "../dist/server.js";
@@ -97,6 +98,31 @@ test("Antigravity ask_question becomes a mirrored AskUserQuestion, and its reply
   assert.equal(lastAntigravityText(transcript.split("\n").slice(0, 4).join("\n")), null, "no reply after the latest prompt yet");
 });
 
+test("Antigravity permission-sensitive tools become bridge permissions", () => {
+  const base = { conversationId: "a-p", stepIdx: 4, workspacePaths: ["/w/app"] };
+  assert.deepEqual(antigravityPermission({ ...base, toolCall: { name: "run_command", args: { CommandLine: "echo $OMARCHY_PATH", Cwd: "/w/app" } } }), {
+    hook_event_name: "PermissionRequest", session_id: "a-p", cwd: "/w/app", tool_name: "Bash",
+    tool_input: { command: "echo $OMARCHY_PATH" }, permission_suggestions: ["command(echo $OMARCHY_PATH)"],
+  });
+  assert.equal(antigravityPermission({ ...base, toolCall: { name: "view_file", args: { AbsolutePath: "/w/app/README.md" } } }), null,
+    "workspace reads keep Antigravity's native policy");
+  assert.equal(antigravityPermission({ ...base, toolCall: { name: "ask_question", args: {} } }), null);
+  assert.equal(antigravityPermission({ ...base, toolCall: { name: "custom_mcp_tool", args: { query: "x" } } }).tool_name, "custom_mcp_tool",
+    "unknown plugin and MCP tools fail toward asking");
+  assert.equal(antigravityPermission({ ...base, toolCall: { name: "search_web", args: { query: "x" } } }).permission_suggestions, undefined,
+    "an incomplete payload never invents a wildcard Always grant");
+  assert.deepEqual(antigravityPermission({ ...base, toolCall: { name: "mcp__github__list_issues", args: {} } }).permission_suggestions,
+    ["mcp(github/list_issues)"], "a precise MCP tool can be granted temporarily");
+
+  assert.deepEqual(antigravityPermissionReply({ hookSpecificOutput: { decision: { behavior: "allow" } } }), { decision: "allow" });
+  assert.deepEqual(antigravityPermissionReply({ hookSpecificOutput: { decision: {
+    behavior: "allow", updatedPermissions: ["command(echo)", 4],
+  } } }), { decision: "allow", permissionOverrides: ["command(echo)"] });
+  assert.deepEqual(antigravityPermissionReply({ hookSpecificOutput: { decision: { behavior: "deny" } } }),
+    { decision: "deny", reason: "The user denied this permission in Hommies." });
+  assert.equal(antigravityPermissionReply({}), null);
+});
+
 test("Grok's ask_user_question becomes an AskUserQuestion, and answers use Grok's own wording", () => {
   const payload = grokPayload("PreToolUse", "pre_tool_use", {
     tool_name: "ask_user_question", toolName: "ask_user_question", tool_use_id: "call-1",
@@ -161,7 +187,7 @@ test("setup registers Gemini CLI, Antigravity, and Grok Build hooks and removes 
     assert.ok(antigravityConfig["their-hook"], "other hook entries stay");
     assert.deepEqual(antigravityConfig.hommies, {
       enabled: true,
-      PreToolUse: [{ matcher: "^ask_question$", hooks: [{
+      PreToolUse: [{ matcher: "*", hooks: [{
         type: "command", command: "test -f /opt/hommies/dist/antigravity-hook.js && node /opt/hommies/dist/antigravity-hook.js PreToolUse || echo '{}'", timeout: 305,
       }] }],
       PostToolUse: [{ matcher: "*", hooks: [{
@@ -190,7 +216,7 @@ test("setup registers Gemini CLI, Antigravity, and Grok Build hooks and removes 
   });
 });
 
-test("the bridge accepts activity and turn ends from the new agents, but not permissions", async () => {
+test("the bridge accepts activity and turn ends from the new agents, and Antigravity permissions", async () => {
   await withServer(async ({ request }) => {
     for (const provider of ["gemini", "antigravity", "grok"]) {
       const session = `${provider}-1`;
@@ -203,7 +229,9 @@ test("the bridge accepts activity and turn ends from the new agents, but not per
       assert.equal((await request("POST", `/v1/providers/${provider}/failure`, {
         hook_event_name: "StopFailure", session_id: `${session}-f`, error: "rate_limit",
       })).status, 200);
-      assert.equal((await request("POST", `/v1/providers/${provider}/permission`, { session_id: session })).status, 404);
+      if (provider !== "antigravity") {
+        assert.equal((await request("POST", `/v1/providers/${provider}/permission`, { session_id: session })).status, 404);
+      }
     }
     const snapshot = await pending(request);
     const providers = new Set(snapshot.sessions.map((session) => session.provider));
@@ -315,6 +343,47 @@ test("the compiled Antigravity question hook allows ask_question unless the bar 
     assert.equal((await pending(request)).threads[0].items[0].summary, "Q?");
     assert.equal(await runHook("antigravity-hook.js", ["PreToolUse"], payload, { HOMMIES_DATA_DIR: join(dataDir, "none") }), '{"decision":"allow"}\n',
       "still allowed with no bridge");
+  });
+});
+
+test("the compiled Antigravity hook answers Bash permissions and falls back to native policy", async () => {
+  await withServer(async ({ dataDir, request }) => {
+    const payload = {
+      conversationId: "a-p9", stepIdx: 7, workspacePaths: ["/w/app"],
+      toolCall: { name: "run_command", args: { CommandLine: 'echo "$OMARCHY_PATH"', Cwd: "/w/app" } },
+    };
+    const hook = runHook("antigravity-hook.js", ["PreToolUse"], payload, { HOMMIES_DATA_DIR: dataDir });
+    let item;
+    for (let attempt = 0; attempt < 100 && !item; attempt++) {
+      item = (await pending(request)).threads[0]?.items[0];
+      if (!item) await new Promise((resolve) => setTimeout(resolve, 30));
+    }
+    assert.equal(item.provider, "antigravity");
+    assert.equal(item.kind, "permission");
+    assert.equal(item.summary, 'Bash: echo "$OMARCHY_PATH"');
+    assert.equal(item.canAcceptAlways, true);
+    await request("POST", "/v1/respond", { threadId: "a-p9", requestId: item.id, decision: "acceptAlways" });
+    assert.deepEqual(JSON.parse(await hook), {
+      decision: "allow", permissionOverrides: ['command(echo "$OMARCHY_PATH")'],
+    });
+
+    item = undefined;
+    const denyHook = runHook("antigravity-hook.js", ["PreToolUse"], { ...payload, stepIdx: 8 }, { HOMMIES_DATA_DIR: dataDir });
+    for (let attempt = 0; attempt < 100; attempt++) {
+      item = (await pending(request)).threads[0]?.items[0];
+      if (item) break;
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    }
+    await request("POST", "/v1/respond", { threadId: "a-p9", requestId: item.id, decision: "decline" });
+    assert.deepEqual(JSON.parse(await denyHook), {
+      decision: "deny", reason: "The user denied this permission in Hommies.",
+    });
+
+    assert.equal(await runHook("antigravity-hook.js", ["PreToolUse"], payload, { HOMMIES_DATA_DIR: join(dataDir, "none") }),
+      '{"decision":""}\n', "without the bridge, Antigravity keeps its native permission prompt");
+    assert.equal(await runHook("antigravity-hook.js", ["PreToolUse"], {
+      ...payload, toolCall: { name: "view_file", args: { AbsolutePath: "/w/app/README.md" } },
+    }, { HOMMIES_DATA_DIR: dataDir }), '{"decision":""}\n', "read-only tools keep native policy");
   });
 });
 
