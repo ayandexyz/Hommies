@@ -36,9 +36,11 @@ Panel {
   component ProviderTab: Button {
     id: providerTab
 
-    required property string providerId
-    required property string providerName
-    required property int pendingCount
+    // Not `required`: the tabs are Repeater delegates, and a required property
+    // stops QML from injecting `modelData` (see SessionRow).
+    property string providerId: ""
+    property string providerName: ""
+    property int pendingCount: 0
 
     text: ""
     implicitHeight: tabContent.implicitHeight + Style.spacing.controlPaddingY * 2
