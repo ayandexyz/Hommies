@@ -10,4 +10,4 @@ export { createDesktopNotifier } from "./notifier.js";
 export { createSoundPlayer } from "./sound.js";
 export type { BridgeSound, BridgeSoundPlayer } from "./sound.js";
 export type { BridgeNotification, BridgeNotifier } from "./notifier.js";
-export type { BridgeServerOptions, PendingItem, PendingResponse, SessionActivity, SessionActivityState, SessionFailureKind } from "./types.js";
+export type { BridgeServerOptions, EditStats, PendingItem, PendingResponse, SessionActivity, SessionActivityState, SessionFailureKind } from "./types.js";

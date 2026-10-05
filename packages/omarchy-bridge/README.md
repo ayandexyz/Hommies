@@ -238,26 +238,51 @@ file contents or diffs. The activity hooks run on every tool call, so they stay
 cheap: no transcript reads, a 1-second request timeout, and no stdout. If the
 bridge is not running they exit at once.
 
+### Edit line counts
+
+For file edits, the panel shows how many lines the edit adds and removes next
+to the step, for example `Edit server.ts  +12 −3`. The adapter works the counts
+out itself and sends only the two numbers as `edit: { "added": 12, "removed": 3 }`.
+The edited text never reaches the bridge.
+
+| Tool | How the lines are counted |
+| --- | --- |
+| `Edit` (Claude), `edit` (OpenCode) | Line diff of `old_string` and `new_string`. With `replace_all`, multiplied by how often `old_string` appears in the file. |
+| `MultiEdit` | Sum over its edits. |
+| `Write` | Line diff of the file on disk and the new content; a new file is all additions. |
+| `apply_patch` (Codex), `patch` (OpenCode) | `+` and `-` lines in the `*** Begin Patch` block, also when it runs through the shell tool. |
+
+Counts are taken on `PreToolUse`, so they describe the edit the agent asked for,
+even if it later fails. The adapter reads the target file only for `Write` and
+`replace_all` edits, and skips files over 1 MB (a `Write` then counts its new
+lines only). The diff matches lines like `git diff --numstat`. A very large
+edit is counted roughly instead, so a hook never slows the agent down.
+
 `GET /v1/pending` lists the activity in `sessions`, newest first:
 
 ```json
 {
   "sessions": [{
     "threadId": "<session id>", "provider": "claude", "state": "working",
-    "steps": ["> fix the build", "Bash pnpm build"],
+    "steps": ["> fix the build", "Bash pnpm build", "Edit server.ts"],
+    "stepEdits": [null, null, { "added": 12, "removed": 3 }],
     "sessionTitle": "Fix the build", "project": "app", "updatedAt": "2026-10-01T12:00:00.000Z"
   }]
 }
 ```
 
-The field is optional, so older plugin copies ignore it. Adapters post to
+The field is optional, so older plugin copies ignore it. `stepEdits` is
+index-aligned with `steps` (`null` for steps that are not edits) and is absent
+when no listed step is an edit. Adapters post to
 `/v1/providers/{claude,codex,opencode,omacode}/activity`:
 
 ```json
 { "hook_event_name": "PreToolUse", "session_id": "...", "cwd": "/w/app", "tool_name": "Bash", "tool_input": { "command": "pnpm build" } }
 ```
 
-`hook_event_name` is `SessionStart`, `PreToolUse`, or `PostToolUseFailure`. The
+`hook_event_name` is `SessionStart`, `PreToolUse`, or `PostToolUseFailure`. A
+`PreToolUse` that edits a file may add `"edit": { "added": 12, "removed": 3 }`;
+the bridge ignores it unless both are non-negative integers. The
 prompt step comes from an optional `prompt` field on the existing
 `UserPromptSubmit` body sent to `/v1/providers/{provider}/resume`.
 

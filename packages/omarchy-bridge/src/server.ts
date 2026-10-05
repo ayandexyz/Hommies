@@ -7,6 +7,7 @@ import { nonceHeader, proofHeader, responseProof, validNonce } from "./bridge-id
 import { ApprovalRequestId, ThreadId, type ProviderDriverKind } from "./localContracts.js";
 import type {
   ActivityHookInput,
+  EditStats,
   AgentProcessFields,
   BridgePreferencesInput,
   FailureHookInput,
@@ -144,6 +145,8 @@ interface TrackedSession {
   readonly provider: Provider;
   state: SessionActivityState;
   steps: string[];
+  /** Index-aligned with `steps`; null for steps that are not file edits. */
+  stepEdits: (EditStats | null)[];
   cwd: string | undefined;
   sessionTitle: string | undefined;
   updatedAt: string;
@@ -457,6 +460,7 @@ function receiveActivity(response: ServerResponse, input: ActivityHookInput, pro
       if (provider === "codex") dropCodexQuestions(state, input.session_id);
       trackSession(state, provider, input.session_id, {
         process: input, cwd: input.cwd, sessionTitle: input.session_title, state: "working", step: describeStep(tool, toolInput),
+        edit: validEditStats(input.edit),
       });
       break;
     case "PostToolUseFailure":
@@ -476,6 +480,8 @@ interface SessionUpdate {
   readonly sessionTitle?: string | undefined;
   readonly state?: SessionActivityState;
   readonly step?: string;
+  /** Line counts for `step` when it is a file edit. */
+  readonly edit?: EditStats | null;
   /** The request body; its process fields, when valid, say where the agent runs. */
   readonly process?: AgentProcessFields;
 }
@@ -485,7 +491,7 @@ function trackSession(state: BridgeState, provider: Provider, sessionId: string,
   const existing = state.sessions.get(sessionId);
   if (existing) clearTimeout(existing.timer);
   const session: TrackedSession = existing ?? {
-    provider, state: "idle", steps: [], cwd: undefined, sessionTitle: undefined, updatedAt: "", pids: [], tmux: undefined, agent: undefined,
+    provider, state: "idle", steps: [], stepEdits: [], cwd: undefined, sessionTitle: undefined, updatedAt: "", pids: [], tmux: undefined, agent: undefined,
   };
   const pids = validPids(update.process?.pids);
   if (pids.length > 0) {
@@ -499,7 +505,11 @@ function trackSession(state: BridgeState, provider: Provider, sessionId: string,
   if (update.state !== undefined) session.state = update.state;
   if (update.step !== undefined) {
     session.steps.push(update.step);
-    if (session.steps.length > maxSessionSteps) session.steps.splice(0, session.steps.length - maxSessionSteps);
+    session.stepEdits.push(update.edit ?? null);
+    if (session.steps.length > maxSessionSteps) {
+      session.steps.splice(0, session.steps.length - maxSessionSteps);
+      session.stepEdits.splice(0, session.stepEdits.length - maxSessionSteps);
+    }
   }
   session.updatedAt = new Date().toISOString();
   const timer = setTimeout(() => {
@@ -976,6 +986,7 @@ function sessionsSnapshot(state: BridgeState): SessionActivity[] {
         provider: session.provider,
         state: session.state,
         steps: [...session.steps],
+        ...(session.stepEdits.some((edit) => edit !== null) ? { stepEdits: [...session.stepEdits] } : {}),
         ...(session.sessionTitle ? { sessionTitle: session.sessionTitle } : {}),
         ...(project ? { project } : {}),
         updatedAt: session.updatedAt,
@@ -1080,6 +1091,14 @@ async function readJson<T>(request: IncomingMessage): Promise<T> {
 
 function isClaudePermissionInput(input: ClaudePermissionHookInput): boolean {
   return typeof input.session_id === "string" && typeof input.cwd === "string" && typeof input.tool_name === "string" && input.tool_input !== null && typeof input.tool_input === "object";
+}
+
+/** Line counts from an adapter, or null when missing or not two sane non-negative integers. */
+function validEditStats(value: unknown): EditStats | null {
+  if (value === null || typeof value !== "object") return null;
+  const { added, removed } = value as Record<string, unknown>;
+  const count = (n: unknown): n is number => typeof n === "number" && Number.isSafeInteger(n) && n >= 0 && n <= 10_000_000;
+  return count(added) && count(removed) ? { added, removed } : null;
 }
 
 /** A short activity label such as `Edit server.ts` or `Bash pnpm test`. */

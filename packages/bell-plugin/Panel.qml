@@ -317,16 +317,31 @@ Panel {
     return prefix + sessionProject(thread) + "  \u00b7  " + String(thread.threadId).slice(0, 8)
   }
 
-  function latestStep(thread) {
-    var steps = thread.activity && thread.activity.steps ? thread.activity.steps : []
-    return steps.length > 0 ? String(steps[steps.length - 1]) : ""
+  /** Line counts for step `index`, or null when it is not a file edit (older bridges never send them). */
+  function stepEdit(thread, index) {
+    var edits = thread && thread.activity && thread.activity.stepEdits ? thread.activity.stepEdits : null
+    var edit = edits && index < edits.length ? edits[index] : null
+    return edit && typeof edit.added === "number" && typeof edit.removed === "number" ? edit : null
   }
 
-  /** The open session's latest steps, newest last. */
+  function editLabel(edit) {
+    return edit ? "+" + edit.added + " \u2212" + edit.removed : ""
+  }
+
+  function latestStep(thread) {
+    var steps = thread.activity && thread.activity.steps ? thread.activity.steps : []
+    if (steps.length === 0) return ""
+    var edit = stepEdit(thread, steps.length - 1)
+    return String(steps[steps.length - 1]) + (edit ? "  " + editLabel(edit) : "")
+  }
+
+  /** The open session's latest steps, newest last, as `{ text, edit }`. */
   function recentSteps(thread) {
     var steps = thread && thread.activity && thread.activity.steps ? thread.activity.steps : []
     var result = []
-    for (var index = Math.max(0, steps.length - 5); index < steps.length; index++) result.push(String(steps[index]))
+    for (var index = Math.max(0, steps.length - 5); index < steps.length; index++) {
+      result.push({ text: String(steps[index]), edit: stepEdit(thread, index) })
+    }
     return result
   }
 
@@ -824,16 +839,53 @@ Panel {
 
               Repeater {
                 model: root.recentSteps(threadColumn.threadData)
-                delegate: Text {
+                delegate: Item {
+                  id: stepRow
                   width: parent.width
-                  leftPadding: Style.space(8)
-                  text: modelData
-                  textFormat: Text.PlainText
-                  elide: Text.ElideRight
-                  color: root.barForeground
-                  opacity: index === root.recentSteps(threadColumn.threadData).length - 1 ? 0.9 : 0.55
-                  font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                  font.pixelSize: Style.font.caption
+                  height: stepText.implicitHeight
+                
+                  readonly property real stepOpacity: index === root.recentSteps(threadColumn.threadData).length - 1 ? 0.9 : 0.55
+                
+                  Text {
+                    id: stepText
+                    anchors.left: parent.left
+                    anchors.right: editCounts.visible ? editCounts.left : parent.right
+                    anchors.rightMargin: editCounts.visible ? Style.space(6) : 0
+                    leftPadding: Style.space(8)
+                    text: modelData.text
+                    textFormat: Text.PlainText
+                    elide: Text.ElideRight
+                    color: root.barForeground
+                    opacity: stepRow.stepOpacity
+                    font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                    font.pixelSize: Style.font.caption
+                  }
+                  // Lines the edit adds and removes; the bridge never sees the edited text.
+                  Row {
+                    id: editCounts
+                    visible: modelData.edit !== null && (modelData.edit.added > 0 || modelData.edit.removed > 0)
+                    anchors.right: parent.right
+                    anchors.verticalCenter: stepText.verticalCenter
+                    spacing: Style.space(4)
+                    opacity: Math.min(1, stepRow.stepOpacity + 0.1)
+                
+                    Text {
+                      visible: modelData.edit !== null && modelData.edit.added > 0
+                      text: modelData.edit ? "+" + modelData.edit.added : ""
+                      textFormat: Text.PlainText
+                      color: statusColors.success
+                      font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                      font.pixelSize: Style.font.caption
+                    }
+                    Text {
+                      visible: modelData.edit !== null && modelData.edit.removed > 0
+                      text: modelData.edit ? "\u2212" + modelData.edit.removed : ""
+                      textFormat: Text.PlainText
+                      color: statusColors.error
+                      font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                      font.pixelSize: Style.font.caption
+                    }
+                  }
                 }
               }
             }

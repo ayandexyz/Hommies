@@ -6,6 +6,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { connectToOwnBridge, nonceHeader, proofHeader, validProof } from "./bridge-identity.js";
+import { editStats } from "./edit-stats.js";
 import { processFields, type ProcessFields } from "./process-tree.js";
 
 export interface BridgeConnection {
@@ -240,11 +241,16 @@ export async function reportActivity(
     const value = input[field];
     if (typeof value === "string") toolInput[field] = value.slice(0, 300);
   }
+  // Only the line counts are sent; the edited text stays in this process.
+  const edit = event.hook_event_name === "PreToolUse" && typeof event.tool_name === "string"
+    ? await editStats(event.tool_name, event.tool_input, event.cwd).catch(() => null)
+    : null;
   const body = {
     hook_event_name: event.hook_event_name,
     session_id: event.session_id,
     cwd: event.cwd,
     ...(typeof event.tool_name === "string" ? { tool_name: event.tool_name, tool_input: toolInput } : {}),
+    ...(edit === null ? {} : { edit }),
     ...await agentProcess(),
   };
   try {
