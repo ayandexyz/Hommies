@@ -83,6 +83,8 @@ test("setup writes each installed agent's config, backs up, and uninstall restor
     assert.equal(written.theme, "dark");
     assert.equal(written.hooks.Stop[0].hooks[0].command,
       "test -f /opt/hommies/dist/claude-hook.js && node /opt/hommies/dist/claude-hook.js || true");
+    assert.deepEqual(written.hooks.SubagentStart, [{ hooks: [{ type: "command", command: written.hooks.Stop[0].hooks[0].command, timeout: 5 }] }]);
+    assert.ok(written.hooks.SubagentStop, "subagent steps need both events");
     assert.deepEqual((await readJson(join(home, ".config", "opencode", "opencode.json"))).plugin,
       ["file:///opt/hommies/dist/opencode-plugin.js"]);
 

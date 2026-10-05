@@ -135,6 +135,8 @@ After installing `@thisisayande/hommies`, add this hook to `~/.claude/settings.j
     "StopFailure": [{ "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/hommies/dist/claude-hook.js", "timeout": 5 }] }],
     "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/hommies/dist/claude-hook.js", "timeout": 5 }] }],
     "SessionEnd": [{ "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/hommies/dist/claude-hook.js", "timeout": 5 }] }],
+    "SubagentStart": [{ "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/hommies/dist/claude-hook.js", "timeout": 5 }] }],
+    "SubagentStop": [{ "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/hommies/dist/claude-hook.js", "timeout": 5 }] }],
     "PermissionRequest": [
       {
         "hooks": [
@@ -227,7 +229,9 @@ busy.
 | `UserPromptSubmit` | thinking | `> ` + the prompt's first line |
 | `PreToolUse` | working | tool + command, file name, pattern, query, or URL |
 | `PostToolUseFailure` | working | same, with `(failed)` |
-| `Stop` | idle | — |
+| `SubagentStart` | working | `Subagent ` + the subagent's name, such as `Subagent Explore` |
+| `SubagentStop` | working, or idle once the turn has ended and no subagent is left | `Subagent Explore finished` |
+| `Stop` | idle, or working while a background subagent still runs | — |
 | `SessionEnd` | removed | — |
 
 Sessions keep their last 20 steps in memory. When an adapter sends the
@@ -287,9 +291,14 @@ when no listed step is an edit. Adapters post to
 { "hook_event_name": "PreToolUse", "session_id": "...", "cwd": "/w/app", "tool_name": "Bash", "tool_input": { "command": "pnpm build" } }
 ```
 
-`hook_event_name` is `SessionStart`, `PreToolUse`, or `PostToolUseFailure`. A
-`PreToolUse` that edits a file may add `"edit": { "added": 12, "removed": 3 }`;
-the bridge ignores it unless both are non-negative integers. The
+`hook_event_name` is `SessionStart`, `PreToolUse`, `PostToolUseFailure`,
+`SubagentStart`, or `SubagentStop`. A `PreToolUse` that edits a file may add
+`"edit": { "added": 12, "removed": 3 }`; the bridge ignores it unless both are
+non-negative integers. The subagent events add `agent_id` (pairs the start
+with its stop) and `agent_type` (the name shown in the step); the subagent's
+reply is never sent. A subagent stopping never clears the session's turn-end
+item, and a new prompt forgets any subagent whose stop never came (for
+example after Esc). The
 prompt step comes from an optional `prompt` field on the existing
 `UserPromptSubmit` body sent to `/v1/providers/{provider}/resume`.
 

@@ -41,6 +41,8 @@ const idleSessionTimeoutMs = 30 * 60 * 1000;
 /** A busy session can sit in one long tool call (a build, a test run), so it gets longer. */
 const busySessionTimeoutMs = 3 * 60 * 60 * 1000;
 const maxSessionSteps = 20;
+/** Running subagents tracked per session; more are still shown as steps. */
+const maxSubagents = 32;
 const hookCheckIntervalMs = 60 * 1000;
 /** How often sessions are checked for an agent process that has exited. */
 const agentExitCheckIntervalMs = 5 * 1000;
@@ -163,6 +165,10 @@ interface TrackedSession {
   tmux: { socket: string; pane: string } | undefined;
   /** The agent process found in `pids`; the session is dropped once it exits. */
   agent: ProcessIdentity | undefined;
+  /** Subagents started and not yet stopped, by `agent_id`. */
+  subagents: Set<string>;
+  /** The main turn ended (`Stop`); the session stays `working` only while subagents run. */
+  turnEnded: boolean;
   timer?: ReturnType<typeof setTimeout>;
 }
 
@@ -372,7 +378,11 @@ function receiveStop(response: ServerResponse, input: ClaudeTurnHookInput, provi
   const summary = question ?? summarizeFinishedTurn(input.last_assistant_message);
   const message = finalMessage(input.last_assistant_message, summary);
   if (provider === "codex") dropCodexQuestions(state, input.session_id);
-  trackSession(state, provider, input.session_id, { process: input, cwd: input.cwd, sessionTitle: input.session_title, state: "idle" });
+  // A subagent still running in the background keeps the session busy after the turn ends.
+  const running = state.sessions.get(input.session_id)?.subagents.size ?? 0;
+  trackSession(state, provider, input.session_id, {
+    process: input, cwd: input.cwd, sessionTitle: input.session_title, state: running > 0 ? "working" : "idle", turnEnded: true,
+  });
   setAttention(state, input.session_id, { provider, kind, summary, ...(message === null ? {} : { message }) }, input.cwd, input.session_title);
   return sendJson(response, 200, { ok: true, attention: kind === "attention" });
 }
@@ -444,8 +454,11 @@ function receiveResume(response: ServerResponse, input: ClaudeTurnHookInput, pro
   if (input.hook_event_name === "SessionEnd") dropSession(state, input.session_id);
   else {
     const prompt = typeof input.prompt === "string" ? oneLine(input.prompt, 80) : "";
+    // A subagent interrupted with Esc never sends SubagentStop; a new prompt must not inherit it.
+    state.sessions.get(input.session_id)?.subagents.clear();
     trackSession(state, provider, input.session_id, {
-      process: input, cwd: input.cwd, sessionTitle: input.session_title, state: "thinking", ...(prompt ? { step: `> ${prompt}` } : {}),
+      process: input, cwd: input.cwd, sessionTitle: input.session_title, state: "thinking", turnEnded: false,
+      ...(prompt ? { step: `> ${prompt}` } : {}),
     });
   }
   publish(state);
@@ -468,10 +481,29 @@ function receiveActivity(response: ServerResponse, input: ActivityHookInput, pro
       clearAttention(state, input.session_id);
       if (provider === "codex") dropCodexQuestions(state, input.session_id);
       trackSession(state, provider, input.session_id, {
-        process: input, cwd: input.cwd, sessionTitle: input.session_title, state: "working", step: describeStep(tool, toolInput),
+        process: input, cwd: input.cwd, sessionTitle: input.session_title, state: "working", step: describeStep(tool, toolInput), turnEnded: false,
         edit: validEditStats(input.edit),
       });
       break;
+    case "SubagentStart":
+    case "SubagentStop": {
+      // Observational only: a subagent stopping never clears the session's turn-end item.
+      const name = typeof input.agent_type === "string" && input.agent_type.trim().length > 0 ? oneLine(input.agent_type, 40) : "agent";
+      const id = typeof input.agent_id === "string" && input.agent_id.length > 0 ? input.agent_id.slice(0, 200) : null;
+      const session = state.sessions.get(input.session_id);
+      const subagents = session?.subagents ?? new Set<string>();
+      if (input.hook_event_name === "SubagentStart") {
+        if (id !== null && subagents.size < maxSubagents) subagents.add(id);
+      } else if (id !== null) subagents.delete(id);
+      const starting = input.hook_event_name === "SubagentStart";
+      const busy = starting || subagents.size > 0 || session?.turnEnded !== true;
+      trackSession(state, provider, input.session_id, {
+        process: input, cwd: input.cwd, sessionTitle: input.session_title, subagents,
+        state: busy ? "working" : "idle",
+        step: starting ? `Subagent ${name}` : `Subagent ${name} finished`,
+      });
+      break;
+    }
     case "PostToolUseFailure":
       trackSession(state, provider, input.session_id, {
         process: input, cwd: input.cwd, sessionTitle: input.session_title, state: "working", step: `${describeStep(tool, toolInput)} (failed)`,
@@ -491,6 +523,8 @@ interface SessionUpdate {
   readonly step?: string;
   /** Line counts for `step` when it is a file edit. */
   readonly edit?: EditStats | null;
+  readonly turnEnded?: boolean;
+  readonly subagents?: Set<string>;
   /** The request body; its process fields, when valid, say where the agent runs. */
   readonly process?: AgentProcessFields;
 }
@@ -501,6 +535,7 @@ function trackSession(state: BridgeState, provider: Provider, sessionId: string,
   if (existing) clearTimeout(existing.timer);
   const session: TrackedSession = existing ?? {
     provider, state: "idle", steps: [], stepEdits: [], cwd: undefined, sessionTitle: undefined, updatedAt: "", pids: [], tmux: undefined, agent: undefined,
+    subagents: new Set(), turnEnded: false,
   };
   const pids = validPids(update.process?.pids);
   if (pids.length > 0) {
@@ -512,6 +547,8 @@ function trackSession(state: BridgeState, provider: Provider, sessionId: string,
   if (typeof update.cwd === "string" && update.cwd.length > 0) session.cwd = update.cwd;
   if (typeof update.sessionTitle === "string" && update.sessionTitle.length > 0) session.sessionTitle = update.sessionTitle;
   if (update.state !== undefined) session.state = update.state;
+  if (update.turnEnded !== undefined) session.turnEnded = update.turnEnded;
+  if (update.subagents !== undefined) session.subagents = update.subagents;
   if (update.step !== undefined) {
     session.steps.push(update.step);
     session.stepEdits.push(update.edit ?? null);

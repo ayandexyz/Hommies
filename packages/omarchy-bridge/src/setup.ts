@@ -40,6 +40,8 @@ const CLAUDE_HOOKS: ReadonlyArray<HookSpec> = [
   { event: "StopFailure", timeout: 5 },
   { event: "UserPromptSubmit", timeout: 5 },
   { event: "SessionEnd", timeout: 5 },
+  { event: "SubagentStart", timeout: 5 },
+  { event: "SubagentStop", timeout: 5 },
 ];
 
 /** Codex has no StopFailure hook, so its failed turns are not reported. */

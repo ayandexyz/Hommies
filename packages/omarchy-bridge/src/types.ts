@@ -301,9 +301,13 @@ export interface ActivityHookInput extends AgentProcessFields {
   readonly session_id: string;
   readonly cwd?: string;
   readonly session_title?: string;
-  readonly hook_event_name: "SessionStart" | "PreToolUse" | "PostToolUseFailure";
+  readonly hook_event_name: "SessionStart" | "PreToolUse" | "PostToolUseFailure" | "SubagentStart" | "SubagentStop";
   readonly tool_name?: string;
   readonly tool_input?: Readonly<Record<string, unknown>>;
   /** Line counts when `PreToolUse` is a file edit; computed by the adapter. */
   readonly edit?: EditStats;
+  /** On `SubagentStart` / `SubagentStop`: pairs the two events. */
+  readonly agent_id?: string;
+  /** On `SubagentStart` / `SubagentStop`: the subagent's name, such as `Explore`; shown in the step. */
+  readonly agent_type?: string;
 }
