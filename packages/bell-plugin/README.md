@@ -35,6 +35,57 @@ To swap the character, add `characters/<Name>.qml` implementing the contract at
 the top of `characters/Hommie.qml` (`mood`, `lookX`, `lookY`, `running`,
 `poke()`), then set `"character": "<Name>"` in `floating.json`.
 
+## Keyboard shortcuts
+
+### Global (Hyprland binds)
+
+Plugins cannot bind keys, so Hommies exposes its actions over shell IPC on the
+`hommies` target, and you bind them in your own Hyprland config. With
+Omarchy's Lua bindings (`~/.config/hypr/bindings.lua`):
+
+```lua
+o.bind("SUPER + ALT + A", "Hommies: answer next", "omarchy-shell hommies jumpToPending")
+o.bind("SUPER + ALT + H", "Hommies: toggle card", "omarchy-shell hommies toggle")
+o.bind("SUPER + ALT + T", "Hommies: go to agent terminal", "omarchy-shell hommies focusTerminal")
+o.bind("SUPER + ALT + M", "Hommies: toggle sounds", "omarchy-shell hommies toggleSounds")
+```
+
+The keys are only examples; pick ones your config does not use. With a
+classic `bindings.conf`:
+
+```ini
+bindd = SUPER ALT, A, Hommies: answer next, exec, omarchy-shell hommies jumpToPending
+```
+
+| Method | Effect | Returns |
+| --- | --- | --- |
+| `jumpToPending` | Opens the card on the oldest waiting permission or question, else the oldest turn end | the item kind, or `none` |
+| `toggle` / `open` / `close` | Opens or closes the card | `open`, `closed`, or `unavailable` |
+| `focusTerminal` | Focuses the terminal of the session waiting on you, else the newest busy one | `ok` or `none` |
+| `toggleSounds` | Turns sounds on or off | `on` or `off` |
+| `toggleNotifications` | Turns desktop notifications on or off | `on` or `off` |
+
+A card opened by a shortcut takes the keyboard right away, so the keys below
+work without a click. The IPC actions drive the floating card; the bar
+panel's keys work the same once it is open.
+
+### In the panel
+
+| Key | Session list | Open session |
+| --- | --- | --- |
+| `↑` `↓` (`k` `j`) | Move the selection | — |
+| `←` `→` (`h` `l`) | Previous / next agent tab | `←` goes back to the list |
+| `Enter` | Open the selected session | Submit the question's answers |
+| `1`–`9` | Open the session at that position | Pick that option of the current question |
+| `a` / `d` / `A` | — | Allow / Deny / Always allow a permission (`A` only when offered) |
+| `x` | — | Dismiss a finished or waiting item |
+| `t` | Go to the selected session's terminal | Go to its terminal |
+| `Esc` | Close | Back to the list |
+
+Once a key is used, a hint line at the bottom lists the keys that do
+something right now. Questions answered in the agent's CLI (the "Claude CLI"
+answer surface) stay read-only here too.
+
 ## Answer surface
 
 The widget setting **Answer agent questions in** controls question ownership:

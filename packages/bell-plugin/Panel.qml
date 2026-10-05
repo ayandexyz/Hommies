@@ -241,7 +241,10 @@ Panel {
     return null
   }
 
-  onSelectedProviderChanged: selectedThreadId = ""
+  onSelectedProviderChanged: {
+    selectedThreadId = ""
+    sessionCursor = 0
+  }
 
   readonly property var builtInProviders: ["claude", "codex", "opencode", "omacode", "gemini", "antigravity", "grok"]
   /** Tabs shown before any agent is connected or active; the newer agents appear once they are. */
@@ -562,6 +565,122 @@ Panel {
     })
   }
 
+  // --- keyboard --------------------------------------------------------------
+  // Arrows (or h/j/k/l) pick a session, Enter opens it, Esc goes back, and
+  // in an open session a / d / A answer a permission, 1-9 pick a question
+  // option, x dismisses a turn-end item, and t jumps to the terminal.
+
+  /** The session row the arrow keys point at; drawn once a key was pressed. */
+  property int sessionCursor: 0
+  property bool keyboardNav: false
+  /** True while a custom-answer field has focus: every key then goes to the field, not the shortcuts. */
+  property bool typingAnswer: false
+  /** Asks the matching question card to pick option `number` (1-based), or to submit. */
+  signal optionKeyPressed(string itemId, int number)
+  signal submitKeyPressed(string itemId)
+
+  onOpenedChanged: {
+    keyboardNav = false
+    sessionCursor = 0
+    typingAnswer = false
+  }
+
+  function cursorThread() {
+    if (currentThreads.length === 0) return null
+    return currentThreads[Math.max(0, Math.min(sessionCursor, currentThreads.length - 1))]
+  }
+
+  /** The open session's first item that a key can answer or dismiss. */
+  function keyItem(kinds) {
+    var items = openThread ? openThread.items : []
+    for (var index = 0; index < items.length; index++) {
+      if (kinds.indexOf(String(items[index].kind)) >= 0) return items[index]
+    }
+    return null
+  }
+
+  function switchProvider(direction) {
+    var tabs = showOtherTab ? shownProviders.concat(["other"]) : shownProviders
+    if (tabs.length === 0) return
+    var index = tabs.indexOf(selectedProvider)
+    selectedProvider = tabs[(Math.max(0, index) + direction + tabs.length) % tabs.length]
+  }
+
+  function moveCursor(dx, dy) {
+    keyboardNav = true
+    if (selectedThreadId !== "") {
+      if (dx < 0) selectedThreadId = ""
+      return
+    }
+    if (dx !== 0) {
+      switchProvider(dx)
+      return
+    }
+    if (currentThreads.length > 0) sessionCursor = Math.max(0, Math.min(currentThreads.length - 1, sessionCursor + dy))
+  }
+
+  function activateCursor() {
+    keyboardNav = true
+    if (selectedThreadId === "") {
+      var thread = cursorThread()
+      if (thread) selectedThreadId = thread.threadId
+      return
+    }
+    var question = keyItem(["question"])
+    if (question) submitKeyPressed(question.id)
+  }
+
+  function goBackOrClose() {
+    if (selectedThreadId !== "") selectedThreadId = ""
+    else close()
+  }
+
+  function respondKey(item, decision) {
+    Bridge.respond({ threadId: openThread.threadId, requestId: item.id, decision: decision }).then(function() {
+      if (root.hostWidget && typeof root.hostWidget.refreshSnapshot === "function") root.hostWidget.refreshSnapshot()
+    }).catch(function(error) {
+      console.warn("hommies keyboard response failed:", error)
+    })
+  }
+
+  function dismissKey() {
+    var item = keyItem(["attention", "finished"])
+    if (item) respondKey(item, "cancel")
+  }
+
+  function handleTextKey(text) {
+    keyboardNav = true
+    var thread = selectedThreadId !== "" ? openThread : cursorThread()
+    if (text === "t") {
+      if (thread && thread.activity && thread.activity.focusable === true) focusTerminal(thread)
+      return
+    }
+    if (selectedThreadId === "") {
+      // 1-9 open the session at that position in the list.
+      if (/^[1-9]$/.test(text) && Number(text) <= currentThreads.length) selectedThreadId = currentThreads[Number(text) - 1].threadId
+      return
+    }
+    var permission = keyItem(["permission"])
+    if (permission) {
+      if (text === "a") respondKey(permission, "accept")
+      else if (text === "d") respondKey(permission, "decline")
+      else if (text === "A" && permission.canAcceptAlways === true) respondKey(permission, "acceptAlways")
+      return
+    }
+    var question = keyItem(["question"])
+    if (question && /^[1-9]$/.test(text)) optionKeyPressed(question.id, Number(text))
+  }
+
+  /** The keys that do something right now, shown under the panel once a key was used. */
+  readonly property string keyHint: {
+    if (selectedThreadId === "") return "\u2191\u2193 select  \u00b7  \u21b5 open  \u00b7  \u2190\u2192 agent  \u00b7  t terminal  \u00b7  esc close"
+    var permission = keyItem(["permission"])
+    if (permission) return "a allow  \u00b7  d deny" + (permission.canAcceptAlways === true ? "  \u00b7  A always" : "") + "  \u00b7  t terminal  \u00b7  esc back"
+    if (keyItem(["question"])) return "1\u20139 option  \u00b7  \u21b5 submit  \u00b7  t terminal  \u00b7  esc back"
+    if (keyItem(["attention", "finished"])) return "x dismiss  \u00b7  t terminal  \u00b7  esc back"
+    return "t terminal  \u00b7  esc back"
+  }
+
   function switchPanel(direction) {
     if (root.bar && typeof root.bar.switchPanelFrom === "function") {
       return root.bar.switchPanelFrom(root.hostWidget || root, direction)
@@ -582,7 +701,12 @@ Panel {
     PanelKeyCatcher {
       id: keyCatcher
       anchors.fill: parent
-      onCloseRequested: root.close()
+      blocked: root.typingAnswer
+      onCloseRequested: root.goBackOrClose()
+      onMoveRequested: function (dx, dy) { root.moveCursor(dx, dy) }
+      onActivateRequested: root.activateCursor()
+      onDeleteRequested: root.dismissKey()
+      onTextKey: function (text) { root.handleTextKey(text) }
       onTabRequested: function (direction) { root.switchPanel(direction) }
 
       Column {
@@ -751,6 +875,7 @@ Panel {
           delegate: SessionRow {
             width: parent.width
             threadData: modelData
+            hasCursor: root.keyboardNav && root.selectedThreadId === "" && index === Math.min(root.sessionCursor, root.currentThreads.length - 1)
             foreground: root.barForeground
             fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
             fontSize: Style.font.body
@@ -975,6 +1100,19 @@ Panel {
                   })
                 }
 
+                Connections {
+                  target: root
+                  function onOptionKeyPressed(itemId, number) {
+                    if (itemId !== itemDelegate.itemData.id || itemDelegate.questions.length === 0) return
+                    var question = itemDelegate.questions[itemDelegate.currentQuestion]
+                    var options = question && question.options ? question.options : []
+                    if (number <= options.length) itemDelegate.chooseOption(question, options[number - 1].label)
+                  }
+                  function onSubmitKeyPressed(itemId) {
+                    if (itemId === itemDelegate.itemData.id) itemDelegate.submitAnswers()
+                  }
+                }
+
                 readonly property color tone: root.itemTone(itemData)
                 readonly property real cardPadding: Style.space(8)
                 property real entrance: 1
@@ -1177,6 +1315,7 @@ Panel {
                       clip: true
                       onTextEdited: itemDelegate.setCustomAnswer(questionColumn.questionData.id, text)
                       onAccepted: itemDelegate.submitAnswers()
+                      onActiveFocusChanged: root.typingAnswer = activeFocus
                     }
                   }
                 }
@@ -1351,6 +1490,19 @@ Panel {
               }
             }
           }
+        }
+
+        Text {
+          visible: root.keyboardNav
+          width: parent.width
+          text: root.keyHint
+          textFormat: Text.PlainText
+          wrapMode: Text.WordWrap
+          horizontalAlignment: Text.AlignHCenter
+          color: root.barForeground
+          opacity: 0.5
+          font.family: root.bar ? root.bar.fontFamily : Style.font.family
+          font.pixelSize: Style.font.caption
         }
       }
     }

@@ -248,6 +248,89 @@ Item {
 
   // --- floating UI -----------------------------------------------------------
 
+  // --- keyboard shortcuts ----------------------------------------------------
+  // Plugins cannot bind keys, so Hyprland binds call these over shell IPC:
+  // `omarchy-shell hommies <method>` (see README).
+
+  /** The oldest item waiting on you: permissions and questions first, then turn ends. */
+  function nextPending() {
+    var threads = snapshot && snapshot.threads ? snapshot.threads : []
+    var rank = function(kind) { return kind === "permission" || kind === "question" ? 0 : kind === "attention" ? 1 : 2 }
+    var best = null
+    for (var threadIndex = 0; threadIndex < threads.length; threadIndex++) {
+      var items = threads[threadIndex].items || []
+      for (var itemIndex = 0; itemIndex < items.length; itemIndex++) {
+        var item = items[itemIndex]
+        var better = best === null || rank(item.kind) < rank(best.item.kind)
+          || (rank(item.kind) === rank(best.item.kind) && String(item.createdAt) < String(best.item.createdAt))
+        if (better) best = { thread: threads[threadIndex], item: item }
+      }
+    }
+    return best
+  }
+
+  /** The newest session whose terminal can be focused, busy ones first. */
+  function focusableSession() {
+    var sessions = snapshot && snapshot.sessions ? snapshot.sessions : []
+    var fallback = ""
+    for (var index = 0; index < sessions.length; index++) {
+      if (sessions[index].focusable !== true) continue
+      if (sessions[index].state !== "idle") return String(sessions[index].threadId)
+      if (fallback === "") fallback = String(sessions[index].threadId)
+    }
+    return fallback
+  }
+
+  /** Opens the card with keyboard focus, so its keys work without a click. */
+  function openCard() {
+    var panel = panelLoader.item
+    if (!panel || !root.screen) return false
+    panel.keyboardOpened = true
+    panel.open()
+    return true
+  }
+
+  IpcHandler {
+    target: "hommies"
+
+    function open(): string { return root.openCard() ? "open" : "unavailable" }
+    function close(): void { if (panelLoader.item) panelLoader.item.close() }
+    function toggle(): string {
+      if (panelLoader.item && panelLoader.item.opened) {
+        panelLoader.item.close()
+        return "closed"
+      }
+      return root.openCard() ? "open" : "unavailable"
+    }
+    /** Opens the card on the oldest waiting permission or question (else a turn end). */
+    function jumpToPending(): string {
+      var next = root.nextPending()
+      var panel = panelLoader.item
+      if (next === null) return "none"
+      if (!panel) return "unavailable"
+      var provider = String(next.item.provider)
+      panel.selectedProvider = panel.isBuiltIn(provider) ? provider : "other"
+      panel.selectedThreadId = String(next.thread.threadId)
+      return root.openCard() ? String(next.item.kind) : "unavailable"
+    }
+    /** Focuses the terminal of the session waiting on you, else the newest busy one. */
+    function focusTerminal(): string {
+      var next = root.nextPending()
+      var threadId = next !== null ? String(next.thread.threadId) : root.focusableSession()
+      if (threadId === "") return "none"
+      Bridge.focus(threadId).catch(function(error) { console.warn("hommies could not focus the terminal:", error) })
+      return "ok"
+    }
+    function toggleSounds(): string {
+      root.setSounds(!root.sounds)
+      return root.sounds ? "on" : "off"
+    }
+    function toggleNotifications(): string {
+      root.setDesktopNotifications(!root.desktopNotifications)
+      return root.desktopNotifications ? "on" : "off"
+    }
+  }
+
   Loader {
     id: panelLoader
     Component.onCompleted: setSource(Qt.resolvedUrl("FloatingPanel.qml"), { hostWidget: root })

@@ -37,7 +37,9 @@ PanelWindow {
   // Overlay sits above fullscreen windows; Top hides under them (e.g. a
   // fullscreen video). Toggled by "Over fullscreen" in the menu.
   WlrLayershell.layer: host.overFullscreen ? WlrLayer.Overlay : WlrLayer.Top
-  WlrLayershell.keyboardFocus: cardOpen ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
+  // A card opened by a shortcut takes the keyboard at once; one opened by a click gets it on demand.
+  WlrLayershell.keyboardFocus: !cardOpen ? WlrKeyboardFocus.None
+    : panel && panel.keyboardOpened ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.OnDemand
 
   mask: cardOpen || menuOpen ? null : buddyRegion
   Region { id: buddyRegion; item: buddy }
