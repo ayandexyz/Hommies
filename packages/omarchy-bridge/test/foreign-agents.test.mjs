@@ -6,7 +6,9 @@ import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { normalizeToolInput, translateAntigravity, translateGemini, translateGrok } from "../dist/foreign-hook.js";
+import {
+  antigravityQuestion, lastAntigravityText, normalizeToolInput, translateAntigravity, translateGemini, translateGrok,
+} from "../dist/foreign-hook.js";
 import { checkHooks, runSetup } from "../dist/setup.js";
 import { startBridgeServer } from "../dist/server.js";
 
@@ -45,6 +47,54 @@ test("Grok Build camelCase payloads and environment map onto Claude's", () => {
   assert.deepEqual(translateGrok({ hookEventName: "StopFailure", sessionId: "x4", error: "rate_limit" }, {}),
     { session_id: "x4", cwd: undefined, hook_event_name: "StopFailure", error: "rate_limit" });
   assert.equal(translateGrok({ hookEventName: "PreCompact", sessionId: "x5" }, {}), null);
+});
+
+// Shapes captured from Grok Build 1.0.46: every field twice, and two event names.
+const grokPayload = (claudeName, grokName, extra) => ({
+  hook_event_name: claudeName, hookEventName: grokName, session_id: "g-1", sessionId: "g-1",
+  cwd: "/w/app", workspaceRoot: "/w/app", permissionMode: "default", ...extra,
+});
+
+test("real Grok Build payloads: Claude's event name wins over Grok's snake_case one", () => {
+  const env = { GROK_HOOK_EVENT: "pre_tool_use", GROK_SESSION_ID: "g-1" };
+  assert.deepEqual(translateGrok(grokPayload("PreToolUse", "pre_tool_use", {
+    tool_name: "run_terminal_command", toolName: "run_terminal_command",
+    tool_input: { command: "ls -la", description: "List files" }, toolInput: { command: "ls -la", description: "List files" },
+  }), env), { session_id: "g-1", cwd: "/w/app", hook_event_name: "PreToolUse", tool_name: "run_terminal_command", tool_input: { command: "ls -la", description: "List files" } });
+  // Only Grok's snake_case name: converted.
+  assert.equal(translateGrok({ hookEventName: "user_prompt_submit", sessionId: "g-1", prompt: "hi" }, {}).hook_event_name, "UserPromptSubmit");
+  assert.equal(translateGrok({ sessionId: "g-1" }, { GROK_HOOK_EVENT: "session_start" }).hook_event_name, "SessionStart");
+
+  const stop = translateGrok(grokPayload("Stop", "stop", { reason: "end_turn", lastAssistantMessage: "done", stopHookActive: false }), {});
+  assert.equal(stop.hook_event_name, "Stop");
+  assert.equal(stop.last_assistant_message, "done");
+  assert.equal(translateGrok(grokPayload("Stop", "stop", { reason: "shutdown" }), {}), null, "the session-end Stop is not a turn end");
+  assert.deepEqual(translateGrok(grokPayload("StopCancelled", "stop_cancelled", { reason: "user_interrupt" }), {}),
+    { session_id: "g-1", cwd: "/w/app", hook_event_name: "StopCancelled" });
+  assert.equal(translateGrok(grokPayload("Stop", "stop", { reason: "end_turn", subagentType: "explore" }), {}), null, "a subagent's stop is not the session's");
+});
+
+test("Antigravity ask_question becomes a mirrored AskUserQuestion, and its reply comes from the transcript", () => {
+  const payload = {
+    conversationId: "a-7", stepIdx: 2, workspacePaths: [], error: "", modelName: "m",
+    toolCall: { name: "ask_question", args: { questions: [{ is_multi_select: false, options: ["Red", "Blue"], question: "Which color do you prefer?" }], toolAction: "Asking" } },
+  };
+  assert.deepEqual(antigravityQuestion(payload), {
+    hook_event_name: "PreToolUse", session_id: "a-7", tool_name: "AskUserQuestion", tool_use_id: "a-7:2",
+    tool_input: { questions: [{ question: "Which color do you prefer?", header: "Question", options: [{ label: "Red" }, { label: "Blue" }], multiSelect: false }] },
+  });
+  assert.equal(antigravityQuestion({ ...payload, toolCall: { name: "run_command", args: {} } }), null);
+
+  const transcript = [
+    { step_index: "0", source: "USER_EXPLICIT", type: "USER_INPUT", content: "old prompt" },
+    { step_index: "1", source: "MODEL", type: "PLANNER_RESPONSE", content: "old answer" },
+    { step_index: "2", source: "USER_EXPLICIT", type: "USER_INPUT", content: "run it" },
+    { step_index: "3", source: "MODEL", type: "PLANNER_RESPONSE", tool_calls: [{ name: "run_command", args: {} }] },
+    { step_index: "4", source: "MODEL", type: "GENERIC", content: "exit 0" },
+    { step_index: "5", source: "MODEL", type: "PLANNER_RESPONSE", content: "All done. Should I commit?" },
+  ].map((entry) => JSON.stringify(entry)).join("\n");
+  assert.equal(lastAntigravityText(transcript), "All done. Should I commit?");
+  assert.equal(lastAntigravityText(transcript.split("\n").slice(0, 4).join("\n")), null, "no reply after the latest prompt yet");
 });
 
 test("Antigravity events come from the hook argument", () => {
@@ -87,6 +137,9 @@ test("setup registers Gemini CLI, Antigravity, and Grok Build hooks and removes 
     assert.ok(antigravityConfig["their-hook"], "other hook entries stay");
     assert.deepEqual(antigravityConfig.hommies, {
       enabled: true,
+      PreToolUse: [{ matcher: "^ask_question$", hooks: [{
+        type: "command", command: "test -f /opt/hommies/dist/antigravity-hook.js && node /opt/hommies/dist/antigravity-hook.js PreToolUse || echo '{}'", timeout: 5,
+      }] }],
       PostToolUse: [{ matcher: "*", hooks: [{
         type: "command", command: "test -f /opt/hommies/dist/antigravity-hook.js && node /opt/hommies/dist/antigravity-hook.js PostToolUse || echo '{}'", timeout: 5,
       }] }],
@@ -94,7 +147,7 @@ test("setup registers Gemini CLI, Antigravity, and Grok Build hooks and removes 
     });
 
     const grokConfig = JSON.parse(await readFile(grok, "utf8"));
-    assert.deepEqual(Object.keys(grokConfig.hooks).sort(), ["PostToolUseFailure", "PreToolUse", "SessionEnd", "SessionStart", "Stop", "StopFailure", "UserPromptSubmit"]);
+    assert.deepEqual(Object.keys(grokConfig.hooks).sort(), ["PostToolUseFailure", "PreToolUse", "SessionEnd", "SessionStart", "Stop", "StopCancelled", "StopFailure", "UserPromptSubmit"]);
     assert.equal(grokConfig.hooks.PreToolUse[0].matcher, undefined, "no matcher: every tool");
 
     const checks = await checkHooks(environment, providers);
@@ -163,6 +216,49 @@ test("the compiled hooks report to their provider and print what each agent expe
 
     // Without a bridge the JSON agents still get their `{}`.
     assert.equal(await runHook("gemini-hook.js", [], { hook_event_name: "BeforeTool", session_id: "g0" }, { HOMMIES_DATA_DIR: join(dataDir, "none") }), "{}\n");
+  });
+});
+
+test("mirrored Antigravity questions are read-only and clear on its next tool call", async () => {
+  await withServer(async ({ request }) => {
+    const ask = {
+      hook_event_name: "PreToolUse", session_id: "a-8", tool_name: "AskUserQuestion", tool_use_id: "a-8:2",
+      tool_input: { questions: [{ question: "Which color?", header: "Question", options: [{ label: "Red" }, { label: "Blue" }], multiSelect: false }] },
+    };
+    const response = await request("POST", "/v1/providers/antigravity/question", ask);
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), {}, "no answer: Antigravity's own UI asks");
+    const item = (await pending(request)).threads[0].items[0];
+    assert.equal(item.kind, "question");
+    assert.equal(item.answerSurface, "cli");
+    assert.deepEqual(item.questions[0].options.map((option) => option.label), ["Red", "Blue"]);
+
+    await request("POST", "/v1/providers/antigravity/activity", {
+      hook_event_name: "PreToolUse", session_id: "a-8", tool_name: "ask_question", tool_input: {},
+    });
+    assert.equal((await pending(request)).totalCount, 0, "answered in Antigravity, so it leaves the bar");
+  });
+});
+
+test("an interrupted turn sets the session idle without a finished item", async () => {
+  await withServer(async ({ request }) => {
+    await request("POST", "/v1/providers/grok/resume", { hook_event_name: "UserPromptSubmit", session_id: "x-9", cwd: "/w/app", prompt: "go" });
+    await request("POST", "/v1/providers/grok/activity", { hook_event_name: "PreToolUse", session_id: "x-9", tool_name: "run_terminal_command", tool_input: { command: "sleep 9" } });
+    await request("POST", "/v1/providers/grok/activity", { hook_event_name: "StopCancelled", session_id: "x-9" });
+    const snapshot = await pending(request);
+    assert.equal(snapshot.totalCount, 0);
+    assert.equal(snapshot.sessions[0].state, "idle");
+    assert.equal(snapshot.sessions[0].steps.at(-1), "(interrupted)");
+  });
+});
+
+test("the compiled Antigravity question hook always allows ask_question", async () => {
+  await withServer(async ({ dataDir, request }) => {
+    const payload = { conversationId: "a-9", stepIdx: 1, workspacePaths: [], toolCall: { name: "ask_question", args: { questions: [{ question: "Q?", options: ["A"] }] } } };
+    assert.equal(await runHook("antigravity-hook.js", ["PreToolUse"], payload, { HOMMIES_DATA_DIR: dataDir }), '{"decision":"allow"}\n');
+    assert.equal((await pending(request)).threads[0].items[0].summary, "Q?");
+    assert.equal(await runHook("antigravity-hook.js", ["PreToolUse"], payload, { HOMMIES_DATA_DIR: join(dataDir, "none") }), '{"decision":"allow"}\n',
+      "still allowed with no bridge");
   });
 });
 

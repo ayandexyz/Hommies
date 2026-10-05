@@ -67,7 +67,10 @@ const GEMINI_HOOKS: ReadonlyArray<HookSpec> = [
   { event: "SessionEnd", timeout: 5000 },
 ];
 
-/** Grok Build uses Claude's event names; a missing matcher matches every tool. */
+/**
+ * Grok Build uses Claude's event names; a missing matcher matches every tool.
+ * `StopCancelled` runs instead of `Stop` when a turn is interrupted.
+ */
 const GROK_HOOKS: ReadonlyArray<HookSpec> = [
   { event: "SessionStart", timeout: 5 },
   { event: "UserPromptSubmit", timeout: 5 },
@@ -75,6 +78,7 @@ const GROK_HOOKS: ReadonlyArray<HookSpec> = [
   { event: "PostToolUseFailure", timeout: 5 },
   { event: "Stop", timeout: 5 },
   { event: "StopFailure", timeout: 5 },
+  { event: "StopCancelled", timeout: 5 },
   { event: "SessionEnd", timeout: 5 },
 ];
 
@@ -210,8 +214,8 @@ export const mergeGrokHooks = (config: JsonObject, command: string | null): Json
  * Antigravity's `hooks.json` maps hook names to their events. We own the
  * `hommies` entry: it is replaced on install and removed on uninstall, and
  * the user's other entries are kept. Antigravity sends no event name, so each
- * command passes it as an argument. `PreToolUse` is not hooked: it must
- * answer with a permission decision.
+ * command passes it as an argument. `PreToolUse` is hooked for `ask_question`
+ * only, since for other tools its answer is a permission decision.
  */
 export function mergeAntigravityHooks(config: JsonObject, hookPath: string | null): JsonObject {
   if (hookPath === null && !(ANTIGRAVITY_HOOK_NAME in config)) return config;
@@ -221,6 +225,8 @@ export function mergeAntigravityHooks(config: JsonObject, hookPath: string | nul
     const handler = (event: string): JsonObject => ({ type: "command", command: jsonHookCommand(hookPath, event), timeout: 5 });
     next[ANTIGRAVITY_HOOK_NAME] = {
       enabled: true,
+      // Only ask_question: the hook allows it and mirrors the question in the bar.
+      PreToolUse: [{ matcher: "^ask_question$", hooks: [handler("PreToolUse")] }],
       PostToolUse: [{ matcher: "*", hooks: [handler("PostToolUse")] }],
       Stop: [handler("Stop")],
     };

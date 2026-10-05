@@ -6,8 +6,10 @@
  * only: permission prompts stay in the agent's own UI, so the hooks never
  * return a decision.
  */
+import { appendFileSync } from "node:fs";
+
 import {
-  isActivityEvent, isTurnEvent, readConnection, readStdin, reportActivity, reportFailure, reportTurn,
+  agentProcess, isActivityEvent, isTurnEvent, postToBridge, readConnection, readStdin, reportActivity, reportFailure, reportTurn,
   type ActivityHookEvent, type FailureHookEvent,
 } from "./hook-common.js";
 
@@ -74,15 +76,22 @@ export function translateGemini(payload: unknown): TranslatedEvent | null {
   }
 }
 
+/** Grok's own snake_case event names (`pre_tool_use`) as Claude's (`PreToolUse`). */
+const pascalEvent = (name: string | undefined): string | undefined =>
+  name?.split("_").map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join("");
+
 /**
- * Grok Build uses Claude's event names with camelCase fields
- * (`hookEventName`, `sessionId`, `toolName`, ...), and also sets
- * `GROK_HOOK_EVENT` and `GROK_SESSION_ID`. snake_case fields are accepted too.
+ * Grok Build sends every field twice, camelCase and Claude's snake_case. The
+ * event name differs between them: `hook_event_name` is Claude's PascalCase
+ * (`PreToolUse`), while `hookEventName` and `GROK_HOOK_EVENT` are Grok's own
+ * snake_case (`pre_tool_use`). Events from inside a subagent carry
+ * `subagentType` and are skipped: they are not the session's own turn.
  */
 export function translateGrok(payload: unknown, env: Readonly<Record<string, string | undefined>>): TranslatedEvent | null {
   if (!isObject(payload)) return null;
-  const pick = (camel: string, snake: string): unknown => payload[camel] ?? payload[snake];
-  const event = str(pick("hookEventName", "hook_event_name")) ?? str(env.GROK_HOOK_EVENT);
+  if (str(payload.subagentType) !== undefined) return null;
+  const pick = (camel: string, snake: string): unknown => payload[snake] ?? payload[camel];
+  const event = str(payload.hook_event_name) ?? pascalEvent(str(payload.hookEventName) ?? str(env.GROK_HOOK_EVENT));
   const base = {
     session_id: str(pick("sessionId", "session_id")) ?? str(env.GROK_SESSION_ID),
     cwd: str(payload.cwd) ?? str(pick("workspaceRoot", "workspace_root")) ?? str(env.GROK_WORKSPACE_ROOT),
@@ -99,6 +108,9 @@ export function translateGrok(payload: unknown, env: Readonly<Record<string, str
       return { ...base, hook_event_name: event, ...(typeof prompt === "string" ? { prompt } : {}) };
     }
     case "Stop": {
+      // A second Stop fires at session end (`reason: "shutdown"`); only `end_turn` ends a turn.
+      const reason = str(payload.reason);
+      if (reason !== undefined && reason !== "end_turn") return null;
       const message = str(pick("lastAssistantMessage", "last_assistant_message"));
       return {
         ...base,
@@ -112,15 +124,96 @@ export function translateGrok(payload: unknown, env: Readonly<Record<string, str
       const details = str(pick("errorDetails", "error_details"));
       return { ...base, hook_event_name: event, error: error ?? "unknown", ...(details === undefined ? {} : { error_details: details }) };
     }
+    case "StopCancelled":
+      // An interrupted or declined turn: no finished item, but the session is no longer busy.
+      return { ...base, hook_event_name: event };
     default:
       return null;
   }
 }
 
 /**
+ * The text of Antigravity's final reply this turn, from its
+ * `transcript_full.jsonl`: the last model response without tool calls after
+ * the last user message.
+ */
+export function lastAntigravityText(transcript: string): string | null {
+  const lines = transcript.split("\n");
+  for (let index = lines.length - 1; index >= 0; index--) {
+    let entry: unknown;
+    try { entry = JSON.parse(lines[index] ?? ""); } catch { continue; }
+    if (!isObject(entry)) continue;
+    if (entry.type === "USER_INPUT") return null;
+    const calls = Array.isArray(entry.tool_calls) ? entry.tool_calls : [];
+    const content = str(entry.content)?.trim();
+    if (entry.source === "MODEL" && entry.type === "PLANNER_RESPONSE" && calls.length === 0 && content) return content;
+  }
+  return null;
+}
+
+/**
+ * Antigravity's `ask_question` call as a Claude AskUserQuestion hook body, or
+ * null for any other tool. Its options are plain strings and its multi-select
+ * flag is `is_multi_select`.
+ */
+export function antigravityQuestion(payload: unknown): Record<string, unknown> | null {
+  if (!isObject(payload) || !isObject(payload.toolCall) || payload.toolCall.name !== "ask_question") return null;
+  const args = isObject(payload.toolCall.args) ? payload.toolCall.args : {};
+  const raw = Array.isArray(args.questions) ? args.questions : [];
+  const questions = raw.flatMap((question: unknown, index: number) => {
+    if (!isObject(question)) return [];
+    const options = (Array.isArray(question.options) ? question.options : [])
+      .filter((option: unknown): option is string => typeof option === "string" && option.length > 0)
+      .map((label: string) => ({ label }));
+    return [{
+      question: str(question.question) ?? `Question ${index + 1}`,
+      header: raw.length > 1 ? `Question ${index + 1}` : "Question",
+      options,
+      multiSelect: question.is_multi_select === true,
+    }];
+  });
+  const session = str(payload.conversationId);
+  if (questions.length === 0 || session === undefined) return null;
+  const workspaces = Array.isArray(payload.workspacePaths) ? payload.workspacePaths : [];
+  const cwd = str(workspaces[0]);
+  return {
+    hook_event_name: "PreToolUse",
+    session_id: session,
+    ...(cwd === undefined ? {} : { cwd }),
+    tool_name: "AskUserQuestion",
+    tool_use_id: `${session}:${typeof payload.stepIdx === "number" ? payload.stepIdx : Date.now()}`,
+    tool_input: { questions },
+  };
+}
+
+/**
+ * Antigravity's PreToolUse, hooked for `ask_question` only: mirrors the
+ * question in the bar and allows the call. Asking is harmless, so `allow`
+ * skips nothing; every other tool keeps Antigravity's own permission flow.
+ */
+export async function runAntigravityQuestionHook(): Promise<void> {
+  try {
+    const input = await readStdin();
+    let payload: unknown;
+    try { payload = JSON.parse(input); } catch { return; }
+    const body = antigravityQuestion(payload);
+    debugLog("antigravity", input, null);
+    if (body === null) return;
+    const connection = await readConnection();
+    if (connection === null) return;
+    await postToBridge(connection, "/v1/providers/antigravity/question", JSON.stringify({ ...body, ...await agentProcess() }), 2_000);
+  } catch {
+    // The bar is optional; Antigravity still asks in its own UI.
+  } finally {
+    process.stdout.write(`${JSON.stringify({ decision: "allow" })}\n`);
+  }
+}
+
+/**
  * Antigravity does not name the event in its payload, so setup passes it as
- * the hook's first argument. Only `PostToolUse` and `Stop` are hooked:
- * `PreToolUse` must answer with a permission decision, and the invocation
+ * the hook's first argument. `PostToolUse` and `Stop` are reported here;
+ * `PreToolUse` is hooked only for `ask_question` (runAntigravityQuestionHook),
+ * since for other tools its answer is a permission decision. The invocation
  * events fire on every model call rather than once per prompt.
  */
 export function translateAntigravity(payload: unknown, event: string | undefined): TranslatedEvent | null {
@@ -147,11 +240,29 @@ export function translateAntigravity(payload: unknown, event: string | undefined
   return null;
 }
 
+/**
+ * Opt-in: with HOMMIES_HOOK_LOG set (in the agent's environment), each hook
+ * appends what it received and what it translated it to. For debugging new
+ * agent versions; never on by default, since payloads carry prompts and code.
+ */
+function debugLog(provider: ForeignProvider, input: string, event: TranslatedEvent | null): void {
+  const file = process.env.HOMMIES_HOOK_LOG;
+  if (!file) return;
+  try {
+    const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => key.startsWith("GROK_")));
+    appendFileSync(file, `${JSON.stringify({ time: new Date().toISOString(), provider, argv: process.argv.slice(2), env, input, event })}\n`, { mode: 0o600 });
+  } catch {
+    // Debugging must never break the hook.
+  }
+}
+
 export interface ForeignHookOptions {
   readonly provider: ForeignProvider;
   readonly translate: (payload: unknown) => TranslatedEvent | null;
   /** Gemini CLI and Antigravity read a JSON object from stdout on every hook. */
   readonly printJson: boolean;
+  /** The final reply when a Stop payload does not carry it, e.g. from the agent's transcript. */
+  readonly finalMessage?: (payload: unknown) => Promise<string | null>;
 }
 
 /** Reads the agent's payload, reports it, and never blocks or decides anything. */
@@ -161,6 +272,7 @@ export async function runForeignHook(options: ForeignHookOptions): Promise<void>
     let payload: unknown;
     try { payload = JSON.parse(input); } catch { return; }
     const event = options.translate(payload);
+    debugLog(options.provider, input, event);
     if (event === null || typeof event.session_id !== "string") return;
     const connection = await readConnection();
     if (connection === null) return;
@@ -169,8 +281,8 @@ export async function runForeignHook(options: ForeignHookOptions): Promise<void>
     if (event.hook_event_name === "StopFailure") return await reportFailure(route, event, connection, null);
     if (isTurnEvent(event.hook_event_name)) {
       await reportTurn(route, event, connection, {
-        // No transcript format to read: a Stop without its final message is still a finished turn.
-        lastAssistantText: async () => "Turn finished.",
+        // A Stop without a readable final message is still a finished turn.
+        lastAssistantText: async () => (await options.finalMessage?.(payload).catch(() => null)) ?? "Turn finished.",
         sessionTitle: async () => null,
       });
     }

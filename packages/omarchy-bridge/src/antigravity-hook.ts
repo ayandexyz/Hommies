@@ -4,7 +4,21 @@
  * payload does not name the event, so setup passes it as the first argument
  * (`antigravity-hook.js PostToolUse`). Always prints `{}` (no decision).
  */
-import { runForeignHook, translateAntigravity } from "./foreign-hook.js";
+import { lastAntigravityText, runAntigravityQuestionHook, runForeignHook, translateAntigravity } from "./foreign-hook.js";
+import { readTranscriptTail } from "./transcript.js";
 
 const event = process.argv[2];
-void runForeignHook({ provider: "antigravity", translate: (payload) => translateAntigravity(payload, event), printJson: true });
+if (event === "PreToolUse") {
+  void runAntigravityQuestionHook();
+} else {
+  void runForeignHook({
+    provider: "antigravity",
+    translate: (payload) => translateAntigravity(payload, event),
+    printJson: true,
+    finalMessage: async (payload) => {
+      const path = payload !== null && typeof payload === "object" ? (payload as { transcriptPath?: unknown }).transcriptPath : undefined;
+      const tail = typeof path === "string" ? await readTranscriptTail(path) : null;
+      return tail === null ? null : lastAntigravityText(tail);
+    },
+  });
+}

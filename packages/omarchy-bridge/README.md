@@ -292,7 +292,9 @@ when no listed step is an edit. Adapters post to
 ```
 
 `hook_event_name` is `SessionStart`, `PreToolUse`, `PostToolUseFailure`,
-`SubagentStart`, or `SubagentStop`. A `PreToolUse` that edits a file may add
+`SubagentStart`, `SubagentStop`, or `StopCancelled` (a turn that ended without
+completing: the session goes idle with an `(interrupted)` step and no
+finished item). A `PreToolUse` that edits a file may add
 `"edit": { "added": 12, "removed": 3 }`; the bridge ignores it unless both are
 non-negative integers. The subagent events add `agent_id` (pairs the start
 with its stop) and `agent_type` (the name shown in the step); the subagent's
@@ -606,6 +608,7 @@ Like Gemini CLI, Antigravity reads JSON from stdout and gets `{}`.
 {
   "hommies": {
     "enabled": true,
+    "PreToolUse": [{ "matcher": "^ask_question$", "hooks": [{ "type": "command", "command": "test -f /path/to/dist/antigravity-hook.js && node /path/to/dist/antigravity-hook.js PreToolUse || echo '{}'", "timeout": 5 }] }],
     "PostToolUse": [{ "matcher": "*", "hooks": [{ "type": "command", "command": "test -f /path/to/dist/antigravity-hook.js && node /path/to/dist/antigravity-hook.js PostToolUse || echo '{}'", "timeout": 5 }] }],
     "Stop": [{ "type": "command", "command": "test -f /path/to/dist/antigravity-hook.js && node /path/to/dist/antigravity-hook.js Stop || echo '{}'", "timeout": 5 }]
   }
@@ -613,14 +616,22 @@ Like Gemini CLI, Antigravity reads JSON from stdout and gets `{}`.
 ```
 
 - `PostToolUse` adds a step once the tool has run (`(failed)` when it sent an
-  `error`). `PreToolUse` is not hooked because its answer must be a permission
-  decision.
+  `error`).
+- `PreToolUse` is hooked for `ask_question` only. The hook mirrors the question
+  in the bar (read-only, like Codex: Antigravity's hooks cannot return an
+  answer) and replies `{"decision":"allow"}`, which skips nothing since asking
+  has no side effect. Every other tool keeps Antigravity's own permission
+  prompt. The question leaves the bar on Antigravity's next tool call or turn end.
 - `Stop` ends the turn when `fullyIdle` is not `false`. A `Stop` with an
   `error` is reported as a failed turn.
 - `PreInvocation` and `PostInvocation` run on every model call, not once per
   prompt, so they are not hooked. Antigravity sessions therefore never show
-  **Thinking**, and since its payloads carry no final message, a turn end reads
-  "Turn finished."
+  **Thinking**.
+- Its payloads carry no final message, so the `Stop` hook reads the last reply
+  from the conversation's `transcriptPath` (`transcript_full.jsonl`). A reply
+  that asks something becomes an `attention` item; without one, the turn end
+  reads "Turn finished."
+- Antigravity reads `hooks.json` when it starts: restart `agy` after setup.
 - The session is the `conversationId`, and the project is the first of
   `workspacePaths`.
 
@@ -628,12 +639,22 @@ Like Gemini CLI, Antigravity reads JSON from stdout and gets `{}`.
 
 `hommies-grok-hook` (`dist/grok-hook.js`), in a hook file of its own,
 `~/.grok/hooks/hommies.json`, so your other Grok hook files are never touched.
-It uses Claude's event names (`SessionStart`, `UserPromptSubmit`,
-`PreToolUse`, `PostToolUseFailure`, `Stop`, `StopFailure`, `SessionEnd`) with
-camelCase fields (`sessionId`, `toolName`, `toolInput`, ...), and also reads
-`GROK_HOOK_EVENT`, `GROK_SESSION_ID`, and `GROK_WORKSPACE_ROOT`. The hook
-writes nothing to stdout, which Grok treats as no opinion, so the tool call
-goes through Grok's normal permission flow.
+It hooks `SessionStart`, `UserPromptSubmit`, `PreToolUse`,
+`PostToolUseFailure`, `Stop`, `StopFailure`, `StopCancelled`, and
+`SessionEnd`. Grok sends every field twice, camelCase and Claude's snake_case,
+and the event name differs between them: `hook_event_name` is Claude's
+(`PreToolUse`) while `hookEventName` and `GROK_HOOK_EVENT` are Grok's own
+snake_case (`pre_tool_use`); the hook reads the former and converts the
+latter. The hook writes nothing to stdout, which Grok treats as allow-only
+("not blocked"), so the tool call still goes through Grok's permission flow.
+
+- Only a `Stop` with `reason: "end_turn"` ends a turn; Grok fires another at
+  session end (`reason: "shutdown"`), which is ignored.
+- `StopCancelled` (Ctrl+C, a declined permission) sets the session idle with an
+  `(interrupted)` step and no finished item, using the `StopCancelled`
+  activity event.
+- Events from inside a subagent carry `subagentType` and are skipped, so a
+  subagent never shows as its own session or ends the parent's turn.
 
 ```json
 {
@@ -643,8 +664,22 @@ goes through Grok's normal permission flow.
 }
 ```
 
-Register the other events the same way. Grok Build also runs Claude Code's
+Register the other events the same way. Grok reads hook files when it
+starts: restart `grok` after setup. Grok Build also runs Claude Code's
 hooks from `.claude/settings.json`. When `GROK_HOOK_EVENT` is set, the Claude
 hook exits at once without output, so a Grok session is reported once, under
 Grok, and never gets a Claude-style answer that Grok would ignore.
+
+### Debugging an agent's hooks
+
+Agents change their hook payloads between versions. To see exactly what the
+Gemini CLI, Antigravity, or Grok Build hook receives, start the agent with
+`HOMMIES_HOOK_LOG` set; each hook appends the raw payload and what it was
+translated to:
+
+```sh
+HOMMIES_HOOK_LOG=/tmp/hommies-hooks.jsonl grok
+```
+
+The log holds prompts and code, so it is off unless you set the variable.
 
