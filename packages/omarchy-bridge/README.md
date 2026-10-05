@@ -199,6 +199,11 @@ checks its closing paragraph. If it ends with `?` or asks for a decision
 item: the session is listed with a "Done" marker and the opening line of
 Claude's report, and it counts toward `totalCount` so the bell notifies you.
 
+Both kinds also carry the full final message in an optional `message` field
+(Markdown, cut at a line break to 4000 characters), unless it adds nothing to
+`summary`. The panel folds it under **Show full message**. The message is
+never passed to desktop notifications.
+
 Both are notify-only: you reply in the terminal. They clear when you
 submit a prompt in that session (`UserPromptSubmit`), when the session ends
 (`SessionEnd`), when Claude starts another tool request in that session, when

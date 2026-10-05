@@ -26,7 +26,7 @@ import type {
   SessionActivityState,
   SessionFailureKind,
 } from "./types.js";
-import { detectReplyRequest, summarizeFinishedTurn } from "./stop-detection.js";
+import { detectReplyRequest, finalMessage, summarizeFinishedTurn } from "./stop-detection.js";
 import { isValidAgentName } from "./agent-name.js";
 import { focusHyprlandWindow, validTmux, type FocusWindow } from "./focus.js";
 import { procAgentProbe, type AgentProcessProbe, type ProcessIdentity } from "./process-tree.js";
@@ -362,9 +362,10 @@ function receiveStop(response: ServerResponse, input: ClaudeTurnHookInput, provi
   const question = detectReplyRequest(input.last_assistant_message);
   const kind = question === null ? "finished" : "attention";
   const summary = question ?? summarizeFinishedTurn(input.last_assistant_message);
+  const message = finalMessage(input.last_assistant_message, summary);
   if (provider === "codex") dropCodexQuestions(state, input.session_id);
   trackSession(state, provider, input.session_id, { process: input, cwd: input.cwd, sessionTitle: input.session_title, state: "idle" });
-  setAttention(state, input.session_id, { provider, kind, summary }, input.cwd, input.session_title);
+  setAttention(state, input.session_id, { provider, kind, summary, ...(message === null ? {} : { message }) }, input.cwd, input.session_title);
   return sendJson(response, 200, { ok: true, attention: kind === "attention" });
 }
 
@@ -372,7 +373,7 @@ function receiveStop(response: ServerResponse, input: ClaudeTurnHookInput, provi
 function setAttention(
   state: BridgeState,
   sessionId: string,
-  fields: Pick<PendingItem, "provider" | "kind" | "summary" | "failure">,
+  fields: Pick<PendingItem, "provider" | "kind" | "summary" | "failure" | "message">,
   cwd: string | undefined,
   sessionTitle: string | undefined,
 ): void {

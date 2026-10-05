@@ -15,6 +15,7 @@ runs the daemon this plugin talks to.
 | `FloatingPanel.qml` | The floating card: provider tabs, sessions, and items only (no settings, no outdated-hooks notice). A separate copy of `Panel.qml` so the two UIs can diverge. |
 | `characters/*.qml` | Swappable characters. `Hommie.qml` (the Omarchy mark with eyes) is the default. |
 | `bridge.js` | JS module loaded by the QML files. Talks to the bridge over `127.0.0.1`. |
+| `markdown.js` | Turns an agent's final message into Qt StyledText for **Show full message**. Escapes all agent text and adds only formatting tags (no images or links). |
 
 ## Floating character
 

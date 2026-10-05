@@ -75,6 +75,22 @@ export function lastAssistantText(transcript: string): string | null {
   return text.length > 0 ? text : null;
 }
 
+/** Longest final message kept on a turn-end item, so one long report cannot bloat `/v1/pending`. */
+export const maxMessageLength = 4000;
+
+/**
+ * The final message to show in full under a turn-end item, or null when it
+ * adds nothing to the one-line `summary`. Long messages are cut at a line break.
+ */
+export function finalMessage(message: string, summary: string): string | null {
+  const text = message.replace(/\r\n?/g, "\n").trim();
+  if (text.length === 0 || text.replace(/\s+/g, " ") === summary) return null;
+  if (text.length <= maxMessageLength) return text;
+  const cut = text.slice(0, maxMessageLength - 1);
+  const lineEnd = cut.lastIndexOf("\n");
+  return `${(lineEnd > maxMessageLength / 2 ? cut.slice(0, lineEnd) : cut).trimEnd()}\n\u2026`;
+}
+
 /** A one-line preview of a finished turn: the opening paragraph, flattened. */
 export function summarizeFinishedTurn(message: string): string {
   const prose = message.replace(/```[\s\S]*?(?:```|$)/g, "\n\n").trim();

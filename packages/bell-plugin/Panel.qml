@@ -3,6 +3,7 @@ import Quickshell
 import qs.Commons
 import qs.Ui
 import "bridge.js" as Bridge
+import "markdown.js" as Markdown
 
 /**
  * Hommies panel.
@@ -315,6 +316,21 @@ Panel {
     var prefix = thread.agent ? String(thread.agent) + "  \u00b7  " : ""
     if (thread.sessionTitle) return prefix + String(thread.sessionTitle)
     return prefix + sessionProject(thread) + "  \u00b7  " + String(thread.threadId).slice(0, 8)
+  }
+
+  /** Turn-end items whose full message is shown, by item id; kept here so a refresh does not fold them. */
+  property var openMessages: ({})
+
+  function messageOpen(item) {
+    return item && openMessages[item.id] === true
+  }
+
+  function toggleMessage(item) {
+    var next = {}
+    for (var key in openMessages) next[key] = openMessages[key]
+    if (next[item.id]) delete next[item.id]
+    else next[item.id] = true
+    openMessages = next
   }
 
   /** Line counts for step `index`, or null when it is not a file edit (older bridges never send them). */
@@ -1256,6 +1272,55 @@ Panel {
                   opacity: 0.65
                   font.family: root.bar ? root.bar.fontFamily : Style.font.family
                   font.pixelSize: Style.font.caption
+                }
+
+                // The agent's full final message, folded by default. Long ones scroll inside
+                // a capped box: the panel itself is sized to its content and does not scroll.
+                Button {
+                  visible: typeof itemDelegate.itemData.message === "string" && itemDelegate.itemData.message.length > 0
+                  width: parent.width
+                  leftAlign: true
+                  text: root.messageOpen(itemDelegate.itemData) ? "\u25be Hide full message" : "\u25b8 Show full message"
+                  foreground: root.barForeground
+                  fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+                  fontSize: Style.font.caption
+                  onClicked: root.toggleMessage(itemDelegate.itemData)
+                }
+
+                Flickable {
+                  id: messageBox
+                  visible: root.messageOpen(itemDelegate.itemData) && typeof itemDelegate.itemData.message === "string"
+                  width: parent.width
+                  height: visible ? Math.min(messageText.implicitHeight, Style.space(240)) : 0
+                  contentWidth: width
+                  contentHeight: messageText.implicitHeight
+                  clip: true
+                  boundsBehavior: Flickable.StopAtBounds
+
+                  Text {
+                    id: messageText
+                    width: messageBox.width - Style.space(8)
+                    // markdown.js escapes the message and adds only formatting tags, never <img> or <a>.
+                    text: messageBox.visible ? Markdown.toStyledText(itemDelegate.itemData.message) : ""
+                    textFormat: Text.StyledText
+                    wrapMode: Text.WrapAtWordBoundaryOrAnywhere
+                    color: root.barForeground
+                    opacity: 0.85
+                    font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                    font.pixelSize: Style.font.caption
+                  }
+
+                  // A thin bar on the right while the message is taller than the box.
+                  Rectangle {
+                    visible: messageBox.contentHeight > messageBox.height
+                    x: messageBox.width - width
+                    y: messageBox.contentY + messageBox.visibleArea.yPosition * messageBox.height
+                    width: Style.space(2)
+                    height: Math.max(Style.space(16), messageBox.visibleArea.heightRatio * messageBox.height)
+                    radius: width / 2
+                    color: root.barForeground
+                    opacity: 0.35
+                  }
                 }
 
                 Button {

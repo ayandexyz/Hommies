@@ -115,6 +115,12 @@ export interface PendingItem {
    */
   readonly failure?: SessionFailureKind;
   /**
+   * The agent's full final message on an `attention` or `finished` item, as
+   * Markdown, cut to 4000 characters. Absent when it adds nothing to
+   * `summary`. Never sent to desktop notifications. Optional for HTTP compatibility.
+   */
+  readonly message?: string;
+  /**
    * Set on a `permission` item when `acceptAlways` would also stop the agent
    * asking again: Claude with permission suggestions, and OpenCode.
    */
