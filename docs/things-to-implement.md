@@ -62,16 +62,16 @@ panel, not only the one-line summary.
 - Keep it out of `notify-send` arguments, following the existing rule in
   `notifier.ts` that private agent text stays out of the notification.
 
-## 3. Gemini CLI and Antigravity support
+## 3. Gemini CLI, Antigravity and Grok Build support
 
-**Goal:** sessions from Gemini CLI and Antigravity (`agy`) show up in the bar
-like any other agent.
+**Goal:** sessions from Gemini CLI, Antigravity (`agy`) and Grok Build
+(xAI's `grok` CLI) show up in the bar like any other agent.
 
 **Today:** `agent-hook.ts` (`hommies-hook --agent <name>`) already accepts
-Claude-style hook JSON from any agent. These two agents use their own event
-names, so they need a translation step.
+Claude-style hook JSON from any agent. These three agents use their own event
+or field names, so they need a translation step.
 
-**Event mapping:**
+### Gemini CLI and Antigravity
 
 | Gemini CLI | Hommies event |
 |---|---|
@@ -93,16 +93,55 @@ Do not hook Gemini's `AfterModel`: it fires on every response chunk.
 Antigravity also uses different field names: map `toolCall.name` to
 `tool_name` and `conversationId` to `session_id`.
 
+### Grok Build
+
+Grok Build has its own hook system, close to Claude Code's:
+
+- **Config:** JSON files in `~/.grok/hooks/*.json` (personal) or
+  `<project>/.grok/hooks/*.json` (project). Each hook has an optional
+  `matcher` (a regex on tool names), a `type` (`command` or `http`) and a
+  `timeout` in seconds (default 5). Project hooks only run after the user
+  trusts the folder with `/hooks-trust` or `--trust`.
+- **Events:** `SessionStart`, `SessionEnd`, `UserPromptSubmit`, `PreToolUse`,
+  `PostToolUse`, `PostToolUseFailure`, `PermissionDenied`, `Stop`,
+  `StopFailure`, `Notification`, `SubagentStart`, `SubagentStop`,
+  `PreCompact`, `PostCompact`. The names already match Hommies' events, so no
+  event mapping is needed.
+- **Payload:** camelCase fields on stdin (`hookEventName`, `sessionId`, `cwd`,
+  `workspaceRoot`, `toolName`, `toolInput`), plus `GROK_HOOK_EVENT`,
+  `GROK_SESSION_ID` and `GROK_WORKSPACE_ROOT` in the environment. The
+  translation layer only has to convert these to snake_case.
+- **Blocking:** only `PreToolUse` can block, by printing
+  `{"decision": ..., "reason": ...}` or exiting with code 2. Timeouts, crashes
+  and bad output allow the tool, which matches our fail-open rule. There is no
+  `PermissionRequest` event, so the first version should be activity and turn
+  ends only, like the other agents in this section.
+
+**Watch out: Grok Build already runs our Claude hooks.** It reads Claude Code
+hooks from `.claude/settings.json` and maps Claude tool names in matchers.
+Anyone who installed the Hommies Claude hooks and then uses Grok Build is
+already sending Grok sessions to the bridge under the `claude` provider. Grok
+also ignores Claude-style verdicts (`hookSpecificOutput.permissionDecision`)
+and treats them as allow. Before shipping:
+
+- Check what `claude-hook.ts` receives when Grok runs it (field casing, event
+  names, the `AskUserQuestion` PreToolUse hook). If `GROK_HOOK_EVENT` is set,
+  the Claude hook should exit with no output and leave the session to the Grok
+  hook, so a session is not shown twice or under the wrong logo.
+- Make sure a question answered in the bar is never silently dropped for a Grok
+  session. If Grok cannot use the answer, do not offer it in the bar.
+
 **Plan:**
 
-- Add a translation layer in `agent-hook.ts`, chosen by `--agent gemini` or
-  `--agent antigravity`, that rewrites the event name and fields before the
-  existing reporting code runs.
+- Add a translation layer in `agent-hook.ts`, chosen by `--agent gemini`,
+  `--agent antigravity` or `--agent grok`, that rewrites the event name and
+  fields before the existing reporting code runs.
 - Add install steps to `setup.ts`: Gemini CLI hooks go in
   `~/.gemini/settings.json`; Antigravity hooks go in
-  `~/.gemini/config/hooks.json` (timeouts in seconds).
-- Add provider logos in `ProviderLogo.qml` and document both in the bridge
-  README.
+  `~/.gemini/config/hooks.json` (timeouts in seconds). Grok Build hooks go in
+  `~/.grok/hooks/hommies.json`.
+- Add provider logos in `ProviderLogo.qml` and document all three in the
+  bridge README.
 - Permission requests stay in the agent's own prompt (the generic hook never
   blocks), so fail-open holds.
 
