@@ -331,8 +331,9 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     if (request.method === "POST" && url.pathname === "/v1/providers/codex/question") {
       return await receiveCodexQuestion(response, await readJson<ClaudeQuestionHookInput>(request), state);
     }
-    if (request.method === "POST" && url.pathname === "/v1/providers/antigravity/question") {
-      return await receiveAntigravityQuestion(response, await readJson<ClaudeQuestionHookInput>(request), state);
+    const relayed = /^\/v1\/providers\/(antigravity|grok)\/question$/.exec(url.pathname);
+    if (request.method === "POST" && relayed) {
+      return await receiveRelayedQuestion(response, await readJson<ClaudeQuestionHookInput>(request), relayed[1] as RelayProvider, state);
     }
     if (request.method === "POST" && url.pathname === "/v1/providers/claude/question/resolved") {
       return resolveClaudeQuestion(response, await readJson<ClaudeQuestionHookInput>(request), state);
@@ -684,8 +685,8 @@ async function receiveQuestion(
     });
     if (answers === null) return sendJson(response, 200, {});
     if (hasRequestIds(provider)) return sendJson(response, 200, { answers: openCodeAnswers(questions, answers) });
-    // Antigravity's hook cannot rewrite the tool input; it relays these to the model instead.
-    if (provider === "antigravity") {
+    // These hooks cannot rewrite the tool input; they relay the answers to the model instead.
+    if (relaysAnswers(provider)) {
       return sendJson(response, 200, { answers: questions.map((question) => ({ question: question.question, answer: String(answers[question.id] ?? "") })) });
     }
     return sendJson(response, 200, { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "allow", updatedInput: { ...input.tool_input, answers } } });
@@ -708,32 +709,42 @@ async function receiveCodexQuestion(response: ServerResponse, input: ClaudeQuest
   return receiveQuestion(response, { ...input, tool_name: "AskUserQuestion" }, "codex", state, "cli");
 }
 
+/** Agents whose question hooks cannot fill in answers but can deny the call with a reason. */
+type RelayProvider = "antigravity" | "grok";
+function relaysAnswers(provider: Provider): provider is RelayProvider {
+  return provider === "antigravity" || provider === "grok";
+}
+
 /**
- * Antigravity's `ask_question` (PreToolUse), already in AskUserQuestion's
- * shape. Its hooks cannot rewrite the tool input, so with the top-bar answer
- * surface the bridge holds the hook and returns `{ answers }`: the hook then
- * denies the call with the answers as the reason, which the model reads. With
- * the CLI surface it is mirrored read-only and Antigravity's own UI asks.
+ * Antigravity's `ask_question` and Grok's `ask_user_question` (PreToolUse),
+ * already in AskUserQuestion's shape. Their hooks cannot rewrite the tool
+ * input, so with the top-bar answer surface the bridge holds the hook until
+ * the bar answers and returns `{ answers }`: the hook then denies the call
+ * with the answers as the reason, which the model reads. With the CLI surface
+ * it is mirrored read-only and the agent's own UI asks.
  */
-async function receiveAntigravityQuestion(response: ServerResponse, input: ClaudeQuestionHookInput, state: BridgeState): Promise<void> {
+async function receiveRelayedQuestion(response: ServerResponse, input: ClaudeQuestionHookInput, provider: RelayProvider, state: BridgeState): Promise<void> {
   if (
     !input || input.hook_event_name !== "PreToolUse" || input.tool_name !== "AskUserQuestion" ||
     typeof input.session_id !== "string" || typeof input.tool_use_id !== "string" ||
     input.tool_input === null || typeof input.tool_input !== "object"
   ) {
-    throw new Error("invalid Antigravity question hook payload");
+    throw new Error("invalid question hook payload");
   }
   dropMirroredQuestions(state, input.session_id);
-  return receiveQuestion(response, input, "antigravity", state);
-}
-
-/** Agents whose questions the bar only mirrors: their hooks cannot return an answer. */
-function mirrorsQuestions(provider: Provider): boolean {
-  return provider === "codex" || provider === "antigravity";
+  return receiveQuestion(response, input, provider, state);
 }
 
 /**
- * Codex and Antigravity send no hook when a mirrored question is answered;
+ * Agents whose hooks send no event when a question is answered in the agent's
+ * own UI, so their next tool call or turn end clears it from the bar.
+ */
+function mirrorsQuestions(provider: Provider): boolean {
+  return provider === "codex" || relaysAnswers(provider);
+}
+
+/**
+ * Codex, Antigravity, and Grok send no hook when a mirrored question is answered;
  * their next tool call, turn end, or prompt in that session means it was.
  */
 function dropMirroredQuestions(state: BridgeState, sessionId: string): boolean {

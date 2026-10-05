@@ -23,6 +23,8 @@ interface HookSpec {
   readonly event: string;
   readonly matcher?: string;
   readonly timeout?: number;
+  /** Extra arguments for this entry's command (see `mergeCommandHooks`'s `commandWithArgs`). */
+  readonly args?: ReadonlyArray<string>;
 }
 
 /**
@@ -69,12 +71,14 @@ const GEMINI_HOOKS: ReadonlyArray<HookSpec> = [
 
 /**
  * Grok Build uses Claude's event names; a missing matcher matches every tool.
- * `StopCancelled` runs instead of `Stop` when a turn is interrupted.
+ * `StopCancelled` runs instead of `Stop` when a turn is interrupted. The
+ * `ask_user_question` entry waits up to 5 minutes for an answer from the bar.
  */
 const GROK_HOOKS: ReadonlyArray<HookSpec> = [
   { event: "SessionStart", timeout: 5 },
   { event: "UserPromptSubmit", timeout: 5 },
   { event: "PreToolUse", timeout: 5 },
+  { event: "PreToolUse", matcher: "^ask_user_question$", timeout: 305, args: ["question"] },
   { event: "PostToolUseFailure", timeout: 5 },
   { event: "Stop", timeout: 5 },
   { event: "StopFailure", timeout: 5 },
@@ -96,9 +100,10 @@ const shellQuote = (value: string): string =>
  * package is removed without `uninstall`, the leftover hooks do nothing instead
  * of erroring on every agent event. The hooks never signal through exit codes.
  */
-export const hookCommand = (hookPath: string): string => {
+export const hookCommand = (hookPath: string, ...args: string[]): string => {
   const path = shellQuote(hookPath);
-  return `test -f ${path} && node ${path} || true`;
+  const rest = args.map((arg) => ` ${shellQuote(arg)}`).join("");
+  return `test -f ${path} && node ${path}${rest} || true`;
 };
 
 /**
@@ -134,6 +139,8 @@ export function mergeCommandHooks(
   specs: ReadonlyArray<HookSpec>,
   hookFile: string,
   command: string | null,
+  /** The command for a spec with `args`; required when any spec has them. */
+  commandWithArgs?: (args: ReadonlyArray<string>) => string,
 ): JsonObject {
   const next: JsonObject = { ...config };
   const hooks: JsonObject = isObject(config.hooks) ? { ...config.hooks } : {};
@@ -156,7 +163,7 @@ export function mergeCommandHooks(
   if (command === null && !removed) return config;
   if (command !== null) {
     for (const spec of specs) {
-      const entry: JsonObject = { type: "command", command };
+      const entry: JsonObject = { type: "command", command: spec.args && commandWithArgs ? commandWithArgs(spec.args) : command };
       if (spec.timeout !== undefined) entry.timeout = spec.timeout;
       const group: JsonObject = spec.matcher === undefined ? { hooks: [entry] } : { matcher: spec.matcher, hooks: [entry] };
       const groups = hooks[spec.event];
@@ -207,8 +214,9 @@ export const mergeCodexHooks = (config: JsonObject, command: string | null): Jso
 export const mergeGeminiSettings = (config: JsonObject, command: string | null): JsonObject =>
   mergeCommandHooks(config, GEMINI_HOOKS, "gemini-hook.js", command);
 
-export const mergeGrokHooks = (config: JsonObject, command: string | null): JsonObject =>
-  mergeCommandHooks(config, GROK_HOOKS, "grok-hook.js", command);
+export const mergeGrokHooks = (config: JsonObject, hookPath: string | null): JsonObject =>
+  mergeCommandHooks(config, GROK_HOOKS, "grok-hook.js", hookPath === null ? null : hookCommand(hookPath),
+    (args) => hookCommand(hookPath ?? "", ...args));
 
 /**
  * Antigravity's `hooks.json` maps hook names to their events. We own the
@@ -338,7 +346,7 @@ function targets(environment: SetupEnvironment): ReadonlyArray<ProviderTarget> {
       provider: "grok",
       configDir: grokDir,
       file: join(grokDir, "hooks", "hommies.json"),
-      merge: (config, install) => mergeGrokHooks(config, install ? hookCommand(join(distDir, "grok-hook.js")) : null),
+      merge: (config, install) => mergeGrokHooks(config, install ? join(distDir, "grok-hook.js") : null),
       fingerprint: (config) => commandHookFingerprint(config, "grok-hook.js"),
     },
   ];

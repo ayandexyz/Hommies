@@ -7,7 +7,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
-  antigravityAnswerReply, antigravityQuestion, lastAntigravityText, normalizeToolInput, translateAntigravity, translateGemini, translateGrok,
+  antigravityAnswerReply, antigravityQuestion, grokAnswerReply, grokQuestion, lastAntigravityText, normalizeToolInput, translateAntigravity, translateGemini, translateGrok,
 } from "../dist/foreign-hook.js";
 import { checkHooks, runSetup } from "../dist/setup.js";
 import { startBridgeServer } from "../dist/server.js";
@@ -97,6 +97,30 @@ test("Antigravity ask_question becomes a mirrored AskUserQuestion, and its reply
   assert.equal(lastAntigravityText(transcript.split("\n").slice(0, 4).join("\n")), null, "no reply after the latest prompt yet");
 });
 
+test("Grok's ask_user_question becomes an AskUserQuestion, and answers use Grok's own wording", () => {
+  const payload = grokPayload("PreToolUse", "pre_tool_use", {
+    tool_name: "ask_user_question", toolName: "ask_user_question", tool_use_id: "call-1",
+    tool_input: { questions: [
+      { question: "Which color?", options: [{ label: "Red", description: "Warm" }, { label: "Blue", description: "Cool" }] },
+      { question: "Which sizes?", options: [{ label: "S", description: "" }, { label: "M", description: "" }], multi_select: true },
+    ] },
+  });
+  assert.deepEqual(grokQuestion(payload, {}), {
+    hook_event_name: "PreToolUse", session_id: "g-1", cwd: "/w/app", tool_name: "AskUserQuestion", tool_use_id: "call-1",
+    tool_input: { questions: [
+      { question: "Which color?", header: "Question 1", options: [{ label: "Red", description: "Warm" }, { label: "Blue", description: "Cool" }], multiSelect: false },
+      { question: "Which sizes?", header: "Question 2", options: [{ label: "S" }, { label: "M" }], multiSelect: true },
+    ] },
+  });
+  assert.equal(translateGrok(payload, {}), null, "the generic hook leaves the question to the question entry");
+  assert.equal(grokQuestion({ ...payload, tool_name: "run_terminal_command", toolName: "run_terminal_command" }, {}), null);
+
+  const reply = grokAnswerReply({ answers: [{ question: "Which color?", answer: "Blue" }, { question: "Which sizes?", answer: "S, M" }] });
+  assert.equal(reply.decision, "deny");
+  assert.match(reply.reason, /^User has answered your questions: "Which color\?"="Blue", "Which sizes\?"="S, M"\. You can now continue/);
+  assert.equal(grokAnswerReply({}), null);
+});
+
 test("Antigravity events come from the hook argument", () => {
   const base = { conversationId: "a1", workspacePaths: ["/w/app", "/w/lib"], transcriptPath: "/t", modelName: "m" };
   assert.deepEqual(translateAntigravity({ ...base, toolCall: { name: "run_command", args: { CommandLine: "make" } }, stepIdx: 3, error: "" }, "PostToolUse"),
@@ -147,6 +171,9 @@ test("setup registers Gemini CLI, Antigravity, and Grok Build hooks and removes 
     });
 
     const grokConfig = JSON.parse(await readFile(grok, "utf8"));
+    assert.deepEqual(grokConfig.hooks.PreToolUse[1], { matcher: "^ask_user_question$", hooks: [{
+      type: "command", command: "test -f /opt/hommies/dist/grok-hook.js && node /opt/hommies/dist/grok-hook.js question || true", timeout: 305,
+    }] });
     assert.deepEqual(Object.keys(grokConfig.hooks).sort(), ["PostToolUseFailure", "PreToolUse", "SessionEnd", "SessionStart", "Stop", "StopCancelled", "StopFailure", "UserPromptSubmit"]);
     assert.equal(grokConfig.hooks.PreToolUse[0].matcher, undefined, "no matcher: every tool");
 
@@ -288,6 +315,29 @@ test("the compiled Antigravity question hook allows ask_question unless the bar 
     assert.equal((await pending(request)).threads[0].items[0].summary, "Q?");
     assert.equal(await runHook("antigravity-hook.js", ["PreToolUse"], payload, { HOMMIES_DATA_DIR: join(dataDir, "none") }), '{"decision":"allow"}\n',
       "still allowed with no bridge");
+  });
+});
+
+test("the compiled Grok question hook relays a bar answer, and stays silent otherwise", async () => {
+  await withServer(async ({ dataDir, request }) => {
+    const payload = {
+      hook_event_name: "PreToolUse", hookEventName: "pre_tool_use", session_id: "g-5", tool_name: "ask_user_question", tool_use_id: "c-5",
+      tool_input: { questions: [{ question: "Which color?", options: [{ label: "Red", description: "" }, { label: "Blue", description: "" }] }] },
+    };
+    const env = { HOMMIES_DATA_DIR: dataDir, GROK_HOOK_EVENT: "pre_tool_use" };
+    const hook = runHook("grok-hook.js", ["question"], payload, env);
+    let item;
+    for (let attempt = 0; attempt < 100 && !item; attempt++) {
+      item = (await pending(request)).threads[0]?.items[0];
+      if (!item) await new Promise((resolve) => setTimeout(resolve, 30));
+    }
+    await request("POST", "/v1/respond", { threadId: "g-5", requestId: item.id, answers: { "Which color?": "Blue" } });
+    const output = JSON.parse(await hook);
+    assert.equal(output.decision, "deny");
+    assert.match(output.reason, /"Which color\?"="Blue"/);
+
+    await request("POST", "/v1/preferences", { questionAnswerSurface: "cli" });
+    assert.equal(await runHook("grok-hook.js", ["question"], { ...payload, tool_use_id: "c-6" }, env), "", "CLI surface: Grok asks itself");
   });
 });
 

@@ -101,8 +101,12 @@ export function translateGrok(payload: unknown, env: Readonly<Record<string, str
     case "SessionEnd":
       return { ...base, hook_event_name: event };
     case "PreToolUse":
-    case "PostToolUseFailure":
-      return { ...base, hook_event_name: event, tool_name: str(pick("toolName", "tool_name")) ?? "Tool", tool_input: normalizeToolInput(pick("toolInput", "tool_input")) };
+    case "PostToolUseFailure": {
+      const tool = str(pick("toolName", "tool_name")) ?? "Tool";
+      // The `question` hook entry reports this one; a step here would clear the question it posts.
+      if (tool === "ask_user_question" && event === "PreToolUse") return null;
+      return { ...base, hook_event_name: event, tool_name: tool, tool_input: normalizeToolInput(pick("toolInput", "tool_input")) };
+    }
     case "UserPromptSubmit": {
       const prompt = pick("prompt", "prompt");
       return { ...base, hook_event_name: event, ...(typeof prompt === "string" ? { prompt } : {}) };
@@ -210,36 +214,111 @@ export function antigravityAnswerReply(reply: unknown): { decision: "deny"; reas
 }
 
 /**
- * Antigravity's PreToolUse, hooked for `ask_question` only. With the top-bar
- * answer surface the bridge holds the hook until the bar answers; the answers
- * come back as a deny reason (see antigravityAnswerReply). Otherwise, and
- * whenever anything fails, it allows the call and Antigravity asks itself.
- * Every other tool keeps Antigravity's own permission flow.
+ * Grok Build's `ask_user_question` (PreToolUse, from the `question` hook
+ * entry) as a Claude AskUserQuestion hook body, or null for any other tool.
+ * Grok's options already carry `label` and `description`.
  */
-export async function runAntigravityQuestionHook(): Promise<void> {
-  let output: Record<string, unknown> = { decision: "allow" };
+export function grokQuestion(payload: unknown, env: Readonly<Record<string, string | undefined>>): Record<string, unknown> | null {
+  if (!isObject(payload) || str(payload.subagentType) !== undefined) return null;
+  if ((str(payload.tool_name) ?? str(payload.toolName)) !== "ask_user_question") return null;
+  const input = isObject(payload.tool_input) ? payload.tool_input : isObject(payload.toolInput) ? payload.toolInput : {};
+  const raw = Array.isArray(input.questions) ? input.questions : [];
+  const questions = raw.flatMap((question: unknown, index: number) => {
+    if (!isObject(question)) return [];
+    const options = (Array.isArray(question.options) ? question.options : []).flatMap((option: unknown) => {
+      if (!isObject(option) || !str(option.label)) return [];
+      return [{ label: str(option.label), ...(str(option.description) ? { description: str(option.description) } : {}) }];
+    });
+    return [{
+      question: str(question.question) ?? `Question ${index + 1}`,
+      header: raw.length > 1 ? `Question ${index + 1}` : "Question",
+      options,
+      multiSelect: question.multi_select === true || question.multiSelect === true,
+    }];
+  });
+  const session = str(payload.session_id) ?? str(payload.sessionId) ?? str(env.GROK_SESSION_ID);
+  if (questions.length === 0 || session === undefined) return null;
+  const cwd = str(payload.cwd) ?? str(payload.workspaceRoot);
+  return {
+    hook_event_name: "PreToolUse",
+    session_id: session,
+    ...(cwd === undefined ? {} : { cwd }),
+    tool_name: "AskUserQuestion",
+    tool_use_id: str(payload.tool_use_id) ?? str(payload.toolUseId) ?? `${session}:${Date.now()}`,
+    tool_input: { questions },
+  };
+}
+
+/**
+ * Grok's reply once the bar answered: a deny whose reason uses the same words
+ * as Grok's own answered-questions tool result, so the model treats it as the
+ * answer. Null (no output, i.e. allow) when there is nothing to relay.
+ */
+export function grokAnswerReply(reply: unknown): { decision: "deny"; reason: string } | null {
+  if (!isObject(reply) || !Array.isArray(reply.answers)) return null;
+  const entries = reply.answers.flatMap((entry: unknown) => {
+    if (!isObject(entry)) return [];
+    const answer = str(entry.answer)?.trim();
+    return answer ? [`"${str(entry.question) ?? "Question"}"="${answer}"`] : [];
+  });
+  if (entries.length === 0) return null;
+  return {
+    decision: "deny",
+    reason: `User has answered your questions: ${entries.join(", ")}. You can now continue with the user's answers in mind. ` +
+      "(They answered in Hommies, their desktop agent bar, so the question was not shown again. Do not ask it again.)",
+  };
+}
+
+interface QuestionRelay {
+  readonly provider: "antigravity" | "grok";
+  readonly toBody: (payload: unknown) => Record<string, unknown> | null;
+  readonly toReply: (bridgeReply: unknown) => Record<string, unknown> | null;
+  /** What to print when nothing is relayed; null prints nothing. */
+  readonly allow: Record<string, unknown> | null;
+}
+
+/**
+ * A question tool's PreToolUse (Antigravity's `ask_question`, Grok's
+ * `ask_user_question`). Neither agent lets a hook fill in answers, so with the
+ * top-bar answer surface the bridge holds the hook until the bar answers and
+ * the hook denies the call with the answers as the reason, which the model
+ * reads. Otherwise, and whenever anything fails, the call is allowed and the
+ * agent asks in its own UI. Every other tool keeps the agent's permission flow.
+ */
+export async function runQuestionRelayHook(relay: QuestionRelay): Promise<void> {
+  let output = relay.allow;
   try {
     const input = await readStdin();
     let payload: unknown;
     try { payload = JSON.parse(input); } catch { return; }
-    const body = antigravityQuestion(payload);
-    debugLog("antigravity", input, null);
+    const body = relay.toBody(payload);
+    debugLog(relay.provider, input, null);
     if (body === null) return;
     const connection = await readConnection();
     if (connection === null) return;
     // Matches the bridge's wait for an answer (5 minutes) plus a margin.
-    const reply = await postToBridge(connection, "/v1/providers/antigravity/question", JSON.stringify({ ...body, ...await agentProcess() }), 5 * 60 * 1000 + 5_000);
+    const reply = await postToBridge(connection, `/v1/providers/${relay.provider}/question`, JSON.stringify({ ...body, ...await agentProcess() }), 5 * 60 * 1000 + 5_000);
     if (reply.ok) {
       let parsed: unknown = null;
       try { parsed = JSON.parse(reply.text); } catch { parsed = null; }
-      output = antigravityAnswerReply(parsed) ?? output;
+      output = relay.toReply(parsed) ?? output;
     }
   } catch {
-    // The bar is optional; Antigravity still asks in its own UI.
+    // The bar is optional; the agent still asks in its own UI.
   } finally {
-    process.stdout.write(`${JSON.stringify(output)}\n`);
+    if (output !== null) process.stdout.write(`${JSON.stringify(output)}\n`);
   }
 }
+
+/** Antigravity's `ask_question`; its PreToolUse must always print a decision. */
+export const runAntigravityQuestionHook = (): Promise<void> => runQuestionRelayHook({
+  provider: "antigravity", toBody: antigravityQuestion, toReply: antigravityAnswerReply, allow: { decision: "allow" },
+});
+
+/** Grok's `ask_user_question`; silence means allow. */
+export const runGrokQuestionHook = (): Promise<void> => runQuestionRelayHook({
+  provider: "grok", toBody: (payload) => grokQuestion(payload, process.env), toReply: grokAnswerReply, allow: null,
+});
 
 /**
  * Antigravity does not name the event in its payload, so setup passes it as

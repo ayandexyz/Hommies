@@ -662,6 +662,14 @@ latter. The hook writes nothing to stdout, which Grok treats as allow-only
   activity event.
 - Events from inside a subagent carry `subagentType` and are skipped, so a
   subagent never shows as its own session or ends the parent's turn.
+- `ask_user_question` gets a second `PreToolUse` entry (matcher
+  `^ask_user_question$`, timeout 305 s) that runs `grok-hook.js question`.
+  Grok's hooks cannot fill in a tool's answers, so it works like Antigravity's:
+  with the **Top bar** surface the hook waits for the bar, then denies the call
+  with Grok's own answer wording as the reason (`User has answered your
+  questions: "Which color?"="Blue". You can now continue …`), and the model
+  carries on with it. With no answer, or the **Claude CLI** surface, the hook
+  prints nothing (allow) and Grok asks in its own UI.
 
 ```json
 {
