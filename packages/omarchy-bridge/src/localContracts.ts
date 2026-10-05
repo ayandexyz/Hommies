@@ -17,6 +17,7 @@ export type ProviderDriverKind =
   | "cursor"
   | "grok"
   | "antigravity"
+  | "gemini"
   | (string & { readonly [ProviderDriverKindBrand]: void });
 
 declare const ThreadIdBrand: unique symbol;

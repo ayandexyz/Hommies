@@ -93,12 +93,17 @@ interface PendingQuestion {
   readonly timer: ReturnType<typeof setTimeout>;
 }
 
-type BuiltInProvider = "claude" | "codex" | "opencode" | "omacode";
-const builtInProviders: ReadonlyArray<BuiltInProvider> = ["claude", "codex", "opencode", "omacode"];
+type BuiltInProvider = "claude" | "codex" | "opencode" | "omacode" | ActivityOnlyProvider;
+/**
+ * Agents whose hooks report live activity, turn ends, and failures only:
+ * they have no hook that can answer a permission or question.
+ */
+type ActivityOnlyProvider = "gemini" | "antigravity" | "grok";
+const builtInProviders: ReadonlyArray<BuiltInProvider> = ["claude", "codex", "opencode", "omacode", "gemini", "antigravity", "grok"];
 
 declare const customAgentBrand: unique symbol;
 /** A validated custom agent name; only `customAgentName` creates one. */
-type NamedDriverKind = "claude" | "codex" | "opencode" | "omacode" | "cursor" | "grok" | "antigravity";
+type NamedDriverKind = "claude" | "codex" | "opencode" | "omacode" | "cursor" | "grok" | "antigravity" | "gemini";
 type CustomAgent = Exclude<ProviderDriverKind, NamedDriverKind> & { readonly [customAgentBrand]: true };
 type Provider = BuiltInProvider | CustomAgent;
 
@@ -128,6 +133,9 @@ const providerLabels: Record<BuiltInProvider, { readonly agent: string; readonly
   codex: { agent: "Codex", thread: "Codex" },
   opencode: { agent: "OpenCode", thread: "OpenCode" },
   omacode: { agent: "Omacode", thread: "Omacode" },
+  gemini: { agent: "Gemini", thread: "Gemini CLI" },
+  antigravity: { agent: "Antigravity", thread: "Antigravity" },
+  grok: { agent: "Grok", thread: "Grok Build" },
 };
 
 /** Custom agents are labelled with their own name. */
@@ -320,7 +328,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     if (request.method === "POST" && url.pathname === "/v1/providers/claude/question/resolved") {
       return resolveClaudeQuestion(response, await readJson<ClaudeQuestionHookInput>(request), state);
     }
-    const turn = /^\/v1\/providers\/(claude|codex|opencode|omacode)\/(stop|resume)$/.exec(url.pathname);
+    const turn = /^\/v1\/providers\/(claude|codex|opencode|omacode|gemini|antigravity|grok)\/(stop|resume)$/.exec(url.pathname);
     if (request.method === "POST" && turn) {
       const provider = turn[1] as Provider;
       const input = await readJson<ClaudeTurnHookInput>(request);
@@ -337,11 +345,11 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         default: return receiveResume(response, await readJson<ClaudeTurnHookInput>(request), name, state);
       }
     }
-    const failure = /^\/v1\/providers\/(claude|codex|opencode|omacode)\/failure$/.exec(url.pathname);
+    const failure = /^\/v1\/providers\/(claude|codex|opencode|omacode|gemini|antigravity|grok)\/failure$/.exec(url.pathname);
     if (request.method === "POST" && failure) {
       return receiveFailure(response, await readJson<FailureHookInput>(request), failure[1] as Provider, state);
     }
-    const activity = /^\/v1\/providers\/(claude|codex|opencode|omacode)\/activity$/.exec(url.pathname);
+    const activity = /^\/v1\/providers\/(claude|codex|opencode|omacode|gemini|antigravity|grok)\/activity$/.exec(url.pathname);
     if (request.method === "POST" && activity) {
       return receiveActivity(response, await readJson<ActivityHookInput>(request), activity[1] as Provider, state);
     }

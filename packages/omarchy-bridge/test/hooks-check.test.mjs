@@ -24,10 +24,10 @@ test("hook checks report missing, current, and outdated hooks", async () => {
   await withHome(async ({ home, environment }) => {
     await mkdir(join(home, ".claude"));
     await mkdir(join(home, ".codex"));
-    assert.deepEqual(await statuses(environment), [["claude", "missing"], ["codex", "missing"], ["opencode", "not-installed"]]);
+    assert.deepEqual(await statuses(environment), [["claude", "missing"], ["codex", "missing"], ["opencode", "not-installed"], ["gemini", "not-installed"], ["antigravity", "not-installed"], ["grok", "not-installed"]]);
 
     await runSetup(install, environment);
-    assert.deepEqual(await statuses(environment), [["claude", "current"], ["codex", "current"], ["opencode", "not-installed"]]);
+    assert.deepEqual(await statuses(environment), [["claude", "current"], ["codex", "current"], ["opencode", "not-installed"], ["gemini", "not-installed"], ["antigravity", "not-installed"], ["grok", "not-installed"]]);
 
     // An install from an older version: only the permission hook, at an old path.
     const settings = join(home, ".claude", "settings.json");

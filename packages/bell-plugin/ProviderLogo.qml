@@ -3,7 +3,8 @@ import QtQuick.Effects
 import qs.Commons
 
 // Provider mark adapted from omarchy-tokentracker. The source SVG is hidden
-// and recolored so it follows the active Omarchy theme.
+// and recolored so it follows the active Omarchy theme. Providers without an
+// SVG (Gemini, Antigravity, Grok, custom agents) show short letters instead.
 Item {
   id: root
 
@@ -46,6 +47,8 @@ Item {
     visible: !root.logoReady
     text: root.providerId === "claude" ? "C" : root.providerId === "codex" ? "O"
       : root.providerId === "opencode" ? "OC" : root.providerId === "omacode" ? "OM"
+      : root.providerId === "gemini" ? "G" : root.providerId === "antigravity" ? "AG"
+      : root.providerId === "grok" ? "X"
       : root.providerId === "other" ? "+" : "?"
     color: root.tint
     font.family: root.fontFamily

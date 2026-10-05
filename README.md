@@ -1,7 +1,7 @@
 # Hommies
 
 A Omarchy bar plugin that surfaces pending **questions** and **permission requests** from
-coding agents (Claude Code, Codex, OpenCode, Omacode, or any agent with command hooks) so you don't miss
+coding agents (Claude Code, Codex, OpenCode, Omacode, Gemini CLI, Antigravity, Grok Build, or any agent with command hooks) so you don't miss
 them when you're away from the chat UI.
 
 ## Why

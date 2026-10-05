@@ -243,7 +243,9 @@ Panel {
 
   onSelectedProviderChanged: selectedThreadId = ""
 
-  readonly property var builtInProviders: ["claude", "codex", "opencode", "omacode"]
+  readonly property var builtInProviders: ["claude", "codex", "opencode", "omacode", "gemini", "antigravity", "grok"]
+  /** Tabs shown before any agent is connected or active; the newer agents appear once they are. */
+  readonly property var defaultProviders: ["claude", "codex", "opencode", "omacode"]
 
   function isBuiltIn(provider) {
     return builtInProviders.indexOf(String(provider)) >= 0
@@ -256,7 +258,9 @@ Panel {
 
   function providerName(provider) {
     return provider === "codex" ? "Codex" : provider === "opencode" ? "OpenCode"
-      : provider === "omacode" ? "Omacode" : provider === "other" ? "Other"
+      : provider === "omacode" ? "Omacode" : provider === "gemini" ? "Gemini"
+      : provider === "antigravity" ? "Antigravity" : provider === "grok" ? "Grok"
+      : provider === "other" ? "Other"
       : provider === "claude" ? "Claude" : String(provider || "Agent")
   }
 
@@ -269,7 +273,7 @@ Panel {
   /**
    * Built-in agents that get a tab: the ones with Hommies hooks (the bridge's
    * `hooksConnected`) plus any that reported a session or item, such as
-   * Omacode, which has no config to detect. All four until one qualifies.
+   * Omacode, which has no config to detect. `defaultProviders` until one qualifies.
    */
   readonly property var shownProviders: {
     var connected = hostWidget && hostWidget.snapshot && hostWidget.snapshot.hooksConnected
@@ -284,7 +288,7 @@ Panel {
       }
       if (isConnected || providerCount(provider) > 0 || sessionActivity(provider).length > 0) shown.push(provider)
     }
-    return shown.length > 0 ? shown : builtInProviders
+    return shown.length > 0 ? shown : defaultProviders
   }
 
   // Keep the selection on a visible tab when tabs come and go.
