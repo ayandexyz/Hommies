@@ -145,14 +145,47 @@ Example (not yet implemented in test script):
 - **Use case:** Hit the API rate limit or server overloaded
 
 ### Finished (State 8)
-- **Triggered by:** `POST /v1/providers/claude/activity` with `hook_event_name: "SessionEnd"`
+- **Triggered by:** `POST /v1/providers/claude/stop` with `hook_event_name: "Stop"`
 - **Visual:** Happy smile eyes, emits gold sparks, brief bounce animation
 - **Use case:** Turn completed successfully
 
 ### Sleeping (State 9)
-- **Triggered by:** No activity for ~30 minutes, or explicitly set
+- **Triggered by:** 10 minutes (600 s) on the idle mood, from `Service.qml`
 - **Visual:** Dash eyes (closed), gentle bobbing, emits `Z` letters floating upward
 - **Use case:** Long idle timeout (not normally triggered in testing)
+
+## Emotes
+
+Emotes are short animations played on top of the mood. Hommie draws them
+himself, so they are triggered over shell IPC, not through the bridge:
+
+```sh
+node test-states.mjs emote dizzy     # one emote
+node test-states.mjs emotes 3        # every emote, 3 s apart
+omarchy-shell hommies emote wink     # the same call the script makes
+```
+
+| Emote | Plays when | Looks like |
+|-------|-----------|------------|
+| `greet` | The character loads (shell start, plugin reload) | Pops in, wiggles, happy eyes |
+| `celebrate` | Any turn finishes, even while another agent keeps the mood on working | A jump with sparks, happy eyes |
+| `dizzy` | Five clicks within 2.5 s | Spinning spiral eyes, wobble, three stars circling above |
+| `wink` | Every 20-45 s while idle (random) | Right eye closes briefly |
+| `yawn` | Every 20-45 s while idle (random) | Eyes shut, a slow stretch |
+| `look` | Every 20-45 s while idle (random) | Glances left, then right |
+
+A single click is a poke: a squash, a blink, and a small hop.
+
+**Agent moods always win.** Approval, question, error, and rate limit block
+emotes and cancel one that is running, so an emote never hides something
+that needs you. `wink`, `yawn`, and `look` only play on the idle mood, and
+not while the pointer is over Hommie (his eyes follow it then). Asleep, he
+only reacts to `greet` and `dizzy`. `omarchy-shell hommies emote` still
+answers `ok` when the mood blocks an emote; nothing plays.
+
+To see `celebrate` through the real path, choose **Finished while another
+agent works** (`node test-states.mjs finishedBusy`): a working session keeps
+the mood on working, and the second session's finished turn makes him jump.
 
 ## API Details
 

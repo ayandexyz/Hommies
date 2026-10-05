@@ -35,12 +35,36 @@ Item {
   readonly property string character: typeof prefs.character === "string" && /^[A-Za-z0-9_-]+$/.test(prefs.character)
     ? prefs.character : "Hommie"
 
+  /** Asks the character to play an emote (see the contract in characters/Hommie.qml). */
+  signal emoteRequested(string name)
+
+  /** Finished-turn item ids already seen; null until the first snapshot, which never celebrates. */
+  property var seenFinished: null
+
+  /** Celebrates a turn that just finished, even while the mood shows something busier. */
+  function noticeFinished(next) {
+    var seen = {}
+    var fresh = false
+    var threads = next && next.threads ? next.threads : []
+    for (var threadIndex = 0; threadIndex < threads.length; threadIndex++) {
+      var items = threads[threadIndex].items || []
+      for (var itemIndex = 0; itemIndex < items.length; itemIndex++) {
+        if (items[itemIndex].kind !== "finished" || items[itemIndex].failure) continue
+        seen[items[itemIndex].id] = true
+        if (root.seenFinished !== null && !root.seenFinished[items[itemIndex].id]) fresh = true
+      }
+    }
+    root.seenFinished = seen
+    if (fresh) root.emoteRequested("celebrate")
+  }
+
   function refreshSnapshot() {
     Bridge.snapshot().then(function(next) {
       var json = JSON.stringify(next)
       if (json !== root.snapshotJson) {
         root.snapshotJson = json
         root.snapshot = next
+        root.noticeFinished(next)
       }
     }).catch(function(error) {
       console.warn("hommies snapshot failed:", error)
@@ -328,6 +352,12 @@ Item {
     function toggleNotifications(): string {
       root.setDesktopNotifications(!root.desktopNotifications)
       return root.desktopNotifications ? "on" : "off"
+    }
+    /** Plays an emote: greet, celebrate, dizzy, wink, yawn, or look. Urgent moods block them. */
+    function emote(name: string): string {
+      if (["greet", "celebrate", "dizzy", "wink", "yawn", "look"].indexOf(name) < 0) return "unknown"
+      root.emoteRequested(name)
+      return "ok"
     }
   }
 

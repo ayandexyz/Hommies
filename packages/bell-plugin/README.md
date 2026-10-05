@@ -33,7 +33,7 @@ remove the bell from the bar to avoid toggling them from two places.
 
 To swap the character, add `characters/<Name>.qml` implementing the contract at
 the top of `characters/Hommie.qml` (`mood`, `lookX`, `lookY`, `running`,
-`poke()`), then set `"character": "<Name>"` in `floating.json`.
+`poke()`, and optionally `emote(name)` for the greeting, celebrate jump, and idle emotes), then set `"character": "<Name>"` in `floating.json`.
 
 ## Keyboard shortcuts
 

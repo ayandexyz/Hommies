@@ -249,6 +249,14 @@ PanelWindow {
         item.lookY = Qt.binding(function() { return character.lookY })
       }
 
+      // Emotes from the service (a finished turn, or `omarchy-shell hommies emote <name>`).
+      Connections {
+        target: root.host
+        function onEmoteRequested(name) {
+          if (character.item && typeof character.item.emote === "function") character.item.emote(name)
+        }
+      }
+
       // Follow the pointer while hovered, glance at the card while it's
       // open, otherwise look ahead.
       readonly property real lookX: dragArea.containsMouse
