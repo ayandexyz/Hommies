@@ -16,7 +16,7 @@ const dist = fileURLToPath(new URL("../dist/", import.meta.url));
 
 test("tool arguments are renamed to the fields steps are labelled with", () => {
   assert.deepEqual(normalizeToolInput({ CommandLine: "ls", Cwd: "/w" }), { command: "ls" });
-  assert.deepEqual(normalizeToolInput({ TargetFile: "/w/a.ts", CodeContent: "x" }), { file_path: "/w/a.ts" });
+  assert.deepEqual(normalizeToolInput({ TargetFile: "/w/a.ts", CodeContent: "x" }), { file_path: "/w/a.ts", content: "x" });
   assert.deepEqual(normalizeToolInput({ absolute_path: "/w/b.ts" }), { file_path: "/w/b.ts" });
   assert.deepEqual(normalizeToolInput({ filePath: "/w/c.ts", oldString: "a", newString: "b" }), { file_path: "/w/c.ts", old_string: "a", new_string: "b" });
   assert.deepEqual(normalizeToolInput(null), {});
@@ -124,7 +124,7 @@ test("Grok's ask_user_question becomes an AskUserQuestion, and answers use Grok'
 test("Antigravity events come from the hook argument", () => {
   const base = { conversationId: "a1", workspacePaths: ["/w/app", "/w/lib"], transcriptPath: "/t", modelName: "m" };
   assert.deepEqual(translateAntigravity({ ...base, toolCall: { name: "run_command", args: { CommandLine: "make" } }, stepIdx: 3, error: "" }, "PostToolUse"),
-    { session_id: "a1", cwd: "/w/app", hook_event_name: "PreToolUse", tool_name: "run_command", tool_input: { command: "make" } });
+    { session_id: "a1", cwd: "/w/app", hook_event_name: "PreToolUse", tool_already_ran: true, tool_name: "run_command", tool_input: { command: "make" } });
   assert.equal(translateAntigravity({ ...base, toolCall: { name: "run_command", args: {} }, error: "exit 2" }, "PostToolUse").hook_event_name, "PostToolUseFailure");
   assert.deepEqual(translateAntigravity({ ...base, executionNum: 1, terminationReason: "done", error: "", fullyIdle: true }, "Stop"),
     { session_id: "a1", cwd: "/w/app", hook_event_name: "Stop" });

@@ -69,6 +69,39 @@ test("editStats handles each edit tool and ignores the rest", async () => {
   }
 });
 
+test("editStats counts Gemini CLI, Grok Build, and Antigravity edit tools", async () => {
+  const { normalizeToolInput } = await import("../dist/foreign-hook.js");
+  const dir = await mkdtemp(join(tmpdir(), "hommies-edit-agents-"));
+  try {
+    const file = join(dir, "app.ts");
+    await writeFile(file, "a\nb\nc\n");
+
+    // Gemini CLI, hooked before the tool runs.
+    assert.deepEqual(await editStats("replace", { file_path: file, old_string: "b", new_string: "B1\nB2" }), { added: 2, removed: 1 });
+    assert.deepEqual(await editStats("replace", { file_path: file, old_string: "x", new_string: "y", expected_replacements: 3 }), { added: 3, removed: 3 });
+    assert.deepEqual(await editStats("write_file", { file_path: file, content: "a\nb\nc\nd\n" }), { added: 1, removed: 0 });
+
+    // Grok Build: Claude's argument names; an empty old_string creates a file.
+    assert.deepEqual(await editStats("search_replace", { file_path: file, old_string: "c", new_string: "c\nc2" }), { added: 1, removed: 0 });
+    assert.deepEqual(await editStats("search_replace", { file_path: join(dir, "new.ts"), old_string: "", new_string: "x\ny\n" }), { added: 2, removed: 0 });
+
+    // Antigravity, reported after the run, with its own argument names.
+    const agy = (args) => normalizeToolInput(args);
+    assert.deepEqual(await editStats("replace_file_content", agy({ TargetFile: file, TargetContent: "a", ReplacementContent: "a\nz", AllowMultiple: false }), undefined, { afterRun: true }),
+      { added: 1, removed: 0 });
+    assert.deepEqual(await editStats("multi_replace_file_content", agy({
+      TargetFile: file,
+      ReplacementChunks: [{ TargetContent: "a", ReplacementContent: "A", AllowMultiple: false }, { TargetContent: "c\n", ReplacementContent: "", AllowMultiple: false }],
+    }), undefined, { afterRun: true }), { added: 1, removed: 2 });
+    assert.deepEqual(await editStats("write_to_file", agy({ TargetFile: join(dir, "plan.md"), CodeContent: "# Plan\n\n- one\n", Overwrite: false }), undefined, { afterRun: true }),
+      { added: 3, removed: 0 }, "a new file is all additions");
+    assert.equal(await editStats("write_to_file", agy({ TargetFile: file, CodeContent: "new\n", Overwrite: true }), undefined, { afterRun: true }), null,
+      "after the run an overwrite's old content is gone, so no count");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("the bridge keeps edit counts aligned with steps and drops bad ones", async () => {
   await withServer(async ({ request }) => {
     const activity = (body) => request("POST", "/v1/providers/claude/activity", { hook_event_name: "PreToolUse", session_id: "e1", cwd: "/w/app", ...body });

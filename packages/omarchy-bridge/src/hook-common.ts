@@ -51,6 +51,8 @@ export interface FailureHookEvent extends TurnHookEvent {
 export interface ActivityHookEvent extends TurnHookEvent {
   readonly tool_name?: string;
   readonly tool_input?: unknown;
+  /** Set by adapters whose agent reports tools after they ran (Antigravity); never sent. */
+  readonly tool_already_ran?: boolean;
   /** Sent on SubagentStart and SubagentStop. */
   readonly agent_id?: string;
   readonly agent_type?: string;
@@ -249,7 +251,7 @@ export async function reportActivity(
   }
   // Only the line counts are sent; the edited text stays in this process.
   const edit = event.hook_event_name === "PreToolUse" && typeof event.tool_name === "string"
-    ? await editStats(event.tool_name, event.tool_input, event.cwd).catch(() => null)
+    ? await editStats(event.tool_name, event.tool_input, event.cwd, { afterRun: event.tool_already_ran === true }).catch(() => null)
     : null;
   const body = {
     hook_event_name: event.hook_event_name,

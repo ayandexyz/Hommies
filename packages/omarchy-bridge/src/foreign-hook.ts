@@ -33,8 +33,10 @@ const argumentAliases: Readonly<Record<string, string>> = {
   query: "query", searchquery: "query",
   url: "url",
   description: "description",
-  // Kept for edit line counts.
+  // Kept for edit line counts (Antigravity's names map onto Claude's).
   oldstring: "old_string", newstring: "new_string", content: "content", replaceall: "replace_all", edits: "edits",
+  targetcontent: "old_string", replacementcontent: "new_string", codecontent: "content", allowmultiple: "replace_all",
+  replacementchunks: "edits", overwrite: "overwrite", expectedreplacements: "expected_replacements",
 };
 
 /** Renames tool arguments to the snake_case fields the bridge labels steps with. */
@@ -43,7 +45,9 @@ export function normalizeToolInput(input: unknown): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(input)) {
     const alias = argumentAliases[key.toLowerCase().replace(/[_-]/g, "")];
-    if (alias !== undefined && !(alias in out)) out[alias] = value;
+    if (alias === undefined || alias in out) continue;
+    // Each chunk of a multi-replace gets the same renaming.
+    out[alias] = alias === "edits" && Array.isArray(value) ? value.map(normalizeToolInput) : value;
   }
   return out;
 }
@@ -338,6 +342,7 @@ export function translateAntigravity(payload: unknown, event: string | undefined
       ...base,
       // A finished tool call is reported as a step; a failed one as `(failed)`.
       hook_event_name: error === undefined ? "PreToolUse" : "PostToolUseFailure",
+      tool_already_ran: true,
       tool_name: str(call.name) ?? "Tool",
       tool_input: normalizeToolInput(call.args),
     };

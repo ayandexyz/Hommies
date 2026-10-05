@@ -258,13 +258,18 @@ The edited text never reaches the bridge.
 
 | Tool | How the lines are counted |
 | --- | --- |
-| `Edit` (Claude), `edit` (OpenCode) | Line diff of `old_string` and `new_string`. With `replace_all`, multiplied by how often `old_string` appears in the file. |
-| `MultiEdit` | Sum over its edits. |
-| `Write` | Line diff of the file on disk and the new content; a new file is all additions. |
+| `Edit` (Claude), `edit` (OpenCode), `replace` (Gemini CLI), `search_replace` (Grok Build), `replace_file_content` (Antigravity) | Line diff of the old and new text. With `replace_all`, multiplied by how often the old text appears in the file; with Gemini's `expected_replacements`, by that number. |
+| `MultiEdit` (Claude), `multi_replace_file_content` (Antigravity) | Sum over its edits or chunks. |
+| `Write` (Claude, OpenCode), `write_file` (Gemini CLI), `write_to_file` (Antigravity), `search_replace` with an empty `old_string` (Grok, creates a file) | Line diff of the file on disk and the new content; a new file is all additions. |
 | `apply_patch` (Codex), `patch` (OpenCode) | `+` and `-` lines in the `*** Begin Patch` block, also when it runs through the shell tool. |
 
-Counts are taken on `PreToolUse`, so they describe the edit the agent asked for,
-even if it later fails. The adapter reads the target file only for `Write` and
+Antigravity reports a tool only after it ran, when the file already holds the
+new content. Its replacements are still counted from their old and new text,
+and a new file (`Overwrite: false`) is all additions, but an overwrite gets no
+count, since its old content is gone.
+
+Counts are taken on `PreToolUse` (Antigravity: after the tool ran), so they
+describe the edit the agent asked for, even if it later fails. The adapter reads the target file only for `Write` and
 `replace_all` edits, and skips files over 1 MB (a `Write` then counts its new
 lines only). The diff matches lines like `git diff --numstat`. A very large
 edit is counted roughly instead, so a hook never slows the agent down.
