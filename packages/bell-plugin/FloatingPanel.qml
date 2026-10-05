@@ -706,6 +706,7 @@ Panel {
           id: stepProbe
           visible: false
           text: "Ag"
+          textFormat: Text.PlainText
           font.family: root.bar ? root.bar.fontFamily : Style.font.family
           font.pixelSize: Style.font.caption
         }
