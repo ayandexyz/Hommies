@@ -7,7 +7,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
-  antigravityQuestion, lastAntigravityText, normalizeToolInput, translateAntigravity, translateGemini, translateGrok,
+  antigravityAnswerReply, antigravityQuestion, lastAntigravityText, normalizeToolInput, translateAntigravity, translateGemini, translateGrok,
 } from "../dist/foreign-hook.js";
 import { checkHooks, runSetup } from "../dist/setup.js";
 import { startBridgeServer } from "../dist/server.js";
@@ -138,7 +138,7 @@ test("setup registers Gemini CLI, Antigravity, and Grok Build hooks and removes 
     assert.deepEqual(antigravityConfig.hommies, {
       enabled: true,
       PreToolUse: [{ matcher: "^ask_question$", hooks: [{
-        type: "command", command: "test -f /opt/hommies/dist/antigravity-hook.js && node /opt/hommies/dist/antigravity-hook.js PreToolUse || echo '{}'", timeout: 5,
+        type: "command", command: "test -f /opt/hommies/dist/antigravity-hook.js && node /opt/hommies/dist/antigravity-hook.js PreToolUse || echo '{}'", timeout: 305,
       }] }],
       PostToolUse: [{ matcher: "*", hooks: [{
         type: "command", command: "test -f /opt/hommies/dist/antigravity-hook.js && node /opt/hommies/dist/antigravity-hook.js PostToolUse || echo '{}'", timeout: 5,
@@ -219,8 +219,36 @@ test("the compiled hooks report to their provider and print what each agent expe
   });
 });
 
-test("mirrored Antigravity questions are read-only and clear on its next tool call", async () => {
+test("Antigravity answers from the bar become a deny reason the model reads", () => {
+  const reply = antigravityAnswerReply({ answers: [{ question: "Which color?", answer: "Blue" }, { question: "Size?", answer: "" }] });
+  assert.equal(reply.decision, "deny");
+  assert.match(reply.reason, /already answered this in Hommies/);
+  assert.match(reply.reason, /- Which color\? \u2192 Blue/);
+  assert.doesNotMatch(reply.reason, /Size\?/, "unanswered questions are left out");
+  assert.equal(antigravityAnswerReply({}), null, "no answers: allow, so Antigravity asks itself");
+  assert.equal(antigravityAnswerReply({ answers: [{ question: "Q", answer: " " }] }), null);
+});
+
+test("with the top-bar surface the bridge holds an Antigravity question until the bar answers", async () => {
   await withServer(async ({ request }) => {
+    const reply = request("POST", "/v1/providers/antigravity/question", {
+      hook_event_name: "PreToolUse", session_id: "a-6", tool_name: "AskUserQuestion", tool_use_id: "a-6:2",
+      tool_input: { questions: [{ question: "Which color?", header: "Question", options: [{ label: "Red" }, { label: "Blue" }], multiSelect: false }] },
+    });
+    let item;
+    for (let attempt = 0; attempt < 50 && !item; attempt++) {
+      item = (await pending(request)).threads[0]?.items[0];
+      if (!item) await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    assert.equal(item.answerSurface, "topbar");
+    await request("POST", "/v1/respond", { threadId: "a-6", requestId: item.id, answers: { "Which color?": "Blue" } });
+    assert.deepEqual(await (await reply).json(), { answers: [{ question: "Which color?", answer: "Blue" }] });
+  });
+});
+
+test("with the CLI surface Antigravity questions are mirrored read-only and clear on its next tool call", async () => {
+  await withServer(async ({ request }) => {
+    await request("POST", "/v1/preferences", { questionAnswerSurface: "cli" });
     const ask = {
       hook_event_name: "PreToolUse", session_id: "a-8", tool_name: "AskUserQuestion", tool_use_id: "a-8:2",
       tool_input: { questions: [{ question: "Which color?", header: "Question", options: [{ label: "Red" }, { label: "Blue" }], multiSelect: false }] },
@@ -252,8 +280,9 @@ test("an interrupted turn sets the session idle without a finished item", async 
   });
 });
 
-test("the compiled Antigravity question hook always allows ask_question", async () => {
+test("the compiled Antigravity question hook allows ask_question unless the bar answered", async () => {
   await withServer(async ({ dataDir, request }) => {
+    await request("POST", "/v1/preferences", { questionAnswerSurface: "cli" });
     const payload = { conversationId: "a-9", stepIdx: 1, workspacePaths: [], toolCall: { name: "ask_question", args: { questions: [{ question: "Q?", options: ["A"] }] } } };
     assert.equal(await runHook("antigravity-hook.js", ["PreToolUse"], payload, { HOMMIES_DATA_DIR: dataDir }), '{"decision":"allow"}\n');
     assert.equal((await pending(request)).threads[0].items[0].summary, "Q?");

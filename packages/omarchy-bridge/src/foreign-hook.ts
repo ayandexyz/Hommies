@@ -187,11 +187,37 @@ export function antigravityQuestion(payload: unknown): Record<string, unknown> |
 }
 
 /**
- * Antigravity's PreToolUse, hooked for `ask_question` only: mirrors the
- * question in the bar and allows the call. Asking is harmless, so `allow`
- * skips nothing; every other tool keeps Antigravity's own permission flow.
+ * The hook's reply once the bar answered: a deny whose reason carries the
+ * answers. Antigravity shows the model the reason, so it continues with them
+ * instead of asking again. Null (allow) when there is nothing to relay.
+ */
+export function antigravityAnswerReply(reply: unknown): { decision: "deny"; reason: string } | null {
+  if (!isObject(reply) || !Array.isArray(reply.answers)) return null;
+  const lines = reply.answers.flatMap((entry: unknown) => {
+    if (!isObject(entry)) return [];
+    const answer = str(entry.answer)?.trim();
+    return answer ? [`- ${str(entry.question) ?? "Question"} \u2192 ${answer}`] : [];
+  });
+  if (lines.length === 0) return null;
+  return {
+    decision: "deny",
+    reason: [
+      "The user already answered this in Hommies (their desktop agent bar), so the question was not shown again:",
+      ...lines,
+      "Continue with these answers. Do not ask the question again.",
+    ].join("\n"),
+  };
+}
+
+/**
+ * Antigravity's PreToolUse, hooked for `ask_question` only. With the top-bar
+ * answer surface the bridge holds the hook until the bar answers; the answers
+ * come back as a deny reason (see antigravityAnswerReply). Otherwise, and
+ * whenever anything fails, it allows the call and Antigravity asks itself.
+ * Every other tool keeps Antigravity's own permission flow.
  */
 export async function runAntigravityQuestionHook(): Promise<void> {
+  let output: Record<string, unknown> = { decision: "allow" };
   try {
     const input = await readStdin();
     let payload: unknown;
@@ -201,11 +227,17 @@ export async function runAntigravityQuestionHook(): Promise<void> {
     if (body === null) return;
     const connection = await readConnection();
     if (connection === null) return;
-    await postToBridge(connection, "/v1/providers/antigravity/question", JSON.stringify({ ...body, ...await agentProcess() }), 2_000);
+    // Matches the bridge's wait for an answer (5 minutes) plus a margin.
+    const reply = await postToBridge(connection, "/v1/providers/antigravity/question", JSON.stringify({ ...body, ...await agentProcess() }), 5 * 60 * 1000 + 5_000);
+    if (reply.ok) {
+      let parsed: unknown = null;
+      try { parsed = JSON.parse(reply.text); } catch { parsed = null; }
+      output = antigravityAnswerReply(parsed) ?? output;
+    }
   } catch {
     // The bar is optional; Antigravity still asks in its own UI.
   } finally {
-    process.stdout.write(`${JSON.stringify({ decision: "allow" })}\n`);
+    process.stdout.write(`${JSON.stringify(output)}\n`);
   }
 }
 

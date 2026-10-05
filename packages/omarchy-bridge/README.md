@@ -617,11 +617,18 @@ Like Gemini CLI, Antigravity reads JSON from stdout and gets `{}`.
 
 - `PostToolUse` adds a step once the tool has run (`(failed)` when it sent an
   `error`).
-- `PreToolUse` is hooked for `ask_question` only. The hook mirrors the question
-  in the bar (read-only, like Codex: Antigravity's hooks cannot return an
-  answer) and replies `{"decision":"allow"}`, which skips nothing since asking
-  has no side effect. Every other tool keeps Antigravity's own permission
-  prompt. The question leaves the bar on Antigravity's next tool call or turn end.
+- `PreToolUse` is hooked for `ask_question` only (timeout 305 s); every other
+  tool keeps Antigravity's own permission prompt. Its hooks cannot rewrite the
+  tool input, so an answer from the bar travels as a denial reason instead:
+  - **Top bar** surface: the hook waits for the bar. Once you answer, it replies
+    `{"decision":"deny","reason":"The user already answered this in Hommies …
+    Which color? → Blue …"}`. Antigravity skips its own prompt and the model
+    reads the answers from the reason. If the wait ends without an answer
+    (Cancel, timeout, the bridge gone), it replies `{"decision":"allow"}` and
+    Antigravity asks in its own UI.
+  - **Claude CLI** surface: the question is mirrored read-only, the hook allows
+    the call at once, and Antigravity's UI asks. It leaves the bar on
+    Antigravity's next tool call or turn end.
 - `Stop` ends the turn when `fullyIdle` is not `false`. A `Stop` with an
   `error` is reported as a failed turn.
 - `PreInvocation` and `PostInvocation` run on every model call, not once per

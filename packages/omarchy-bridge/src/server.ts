@@ -684,6 +684,10 @@ async function receiveQuestion(
     });
     if (answers === null) return sendJson(response, 200, {});
     if (hasRequestIds(provider)) return sendJson(response, 200, { answers: openCodeAnswers(questions, answers) });
+    // Antigravity's hook cannot rewrite the tool input; it relays these to the model instead.
+    if (provider === "antigravity") {
+      return sendJson(response, 200, { answers: questions.map((question) => ({ question: question.question, answer: String(answers[question.id] ?? "") })) });
+    }
     return sendJson(response, 200, { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "allow", updatedInput: { ...input.tool_input, answers } } });
   } else throw new Error("invalid Claude question hook payload");
 }
@@ -706,7 +710,10 @@ async function receiveCodexQuestion(response: ServerResponse, input: ClaudeQuest
 
 /**
  * Antigravity's `ask_question` (PreToolUse), already in AskUserQuestion's
- * shape. Its hooks cannot supply answers either, so it is mirrored read-only.
+ * shape. Its hooks cannot rewrite the tool input, so with the top-bar answer
+ * surface the bridge holds the hook and returns `{ answers }`: the hook then
+ * denies the call with the answers as the reason, which the model reads. With
+ * the CLI surface it is mirrored read-only and Antigravity's own UI asks.
  */
 async function receiveAntigravityQuestion(response: ServerResponse, input: ClaudeQuestionHookInput, state: BridgeState): Promise<void> {
   if (
@@ -717,7 +724,7 @@ async function receiveAntigravityQuestion(response: ServerResponse, input: Claud
     throw new Error("invalid Antigravity question hook payload");
   }
   dropMirroredQuestions(state, input.session_id);
-  return receiveQuestion(response, input, "antigravity", state, "cli");
+  return receiveQuestion(response, input, "antigravity", state);
 }
 
 /** Agents whose questions the bar only mirrors: their hooks cannot return an answer. */

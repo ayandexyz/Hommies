@@ -222,11 +222,12 @@ export function mergeAntigravityHooks(config: JsonObject, hookPath: string | nul
   const next: JsonObject = { ...config };
   delete next[ANTIGRAVITY_HOOK_NAME];
   if (hookPath !== null) {
-    const handler = (event: string): JsonObject => ({ type: "command", command: jsonHookCommand(hookPath, event), timeout: 5 });
+    const handler = (event: string, timeout = 5): JsonObject => ({ type: "command", command: jsonHookCommand(hookPath, event), timeout });
     next[ANTIGRAVITY_HOOK_NAME] = {
       enabled: true,
       // Only ask_question: the hook allows it and mirrors the question in the bar.
-      PreToolUse: [{ matcher: "^ask_question$", hooks: [handler("PreToolUse")] }],
+      // Waits up to 5 minutes for an answer from the bar (timeouts are in seconds).
+      PreToolUse: [{ matcher: "^ask_question$", hooks: [handler("PreToolUse", 305)] }],
       PostToolUse: [{ matcher: "*", hooks: [handler("PostToolUse")] }],
       Stop: [handler("Stop")],
     };
