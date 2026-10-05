@@ -257,7 +257,7 @@ Panel {
   function providerName(provider) {
     return provider === "codex" ? "Codex" : provider === "opencode" ? "OpenCode"
       : provider === "omacode" ? "Omacode" : provider === "gemini" ? "Gemini"
-      : provider === "antigravity" ? "Antigravity" : provider === "grok" ? "Grok"
+      : provider === "antigravity" ? "Agy" : provider === "grok" ? "Grok"
       : provider === "other" ? "Other"
       : provider === "claude" ? "Claude" : String(provider || "Agent")
   }
