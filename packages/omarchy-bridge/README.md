@@ -98,8 +98,8 @@ npm uninstall -g @thisisayande/hommies
 Run `hommies uninstall` first: npm no longer runs uninstall scripts, so removing
 the package cannot remove the hooks. Each hook command is
 `test -f <hook> && node <hook> || true`, so hooks left behind by a bare
-`npm uninstall` do nothing. OpenCode's `plugin` entry is the exception; remove
-it from `opencode.json` by hand.
+`npm uninstall` do nothing. OpenCode's `plugin` (V1) or `plugins` (V2) entry
+is the exception; remove it from `opencode.json` by hand.
 
 ### Renamed from agent-fold
 
@@ -340,9 +340,10 @@ prompt or the agent runs another tool.
 `error_details`, when sent, is added after the label. Sources:
 
 - **Claude Code**: the `StopFailure` hook.
-- **OpenCode**: `session.error` (not for Esc interrupts or subagents). A 429 is
-  a rate limit, 529 overloaded, other 5xx a server error, `ProviderAuthError`
-  a sign-in error, and `MessageOutputLengthError` the output token limit.
+- **OpenCode**: `session.error` on V1, `session.execution.failed` on V2 (not
+  for Esc interrupts or subagents). A 429 is a rate limit, 529 overloaded,
+  other 5xx a server error, `ProviderAuthError` (V2: a 401 or 403) a sign-in
+  error, and `MessageOutputLengthError` the output token limit.
 - **Codex** has no failure hook, so its failed turns are not reported.
 
 Adapters post to `/v1/providers/{provider}/failure`:
@@ -503,22 +504,34 @@ keeps its native approval prompt; turn hooks never write to stdout.
 
 ## OpenCode integration
 
-OpenCode has no command hooks, so Hommies ships an OpenCode server plugin,
-`dist/opencode-plugin.js`. It runs inside OpenCode and gives OpenCode the same
-features as Claude Code:
+OpenCode has no command hooks, so Hommies ships an OpenCode server plugin in two
+builds, one per OpenCode plugin API:
+
+- **OpenCode 1.x**: `dist/opencode-plugin.js`, a V1 plugin file.
+- **OpenCode 2.x**: `dist/opencode-v2/`, a V2 plugin directory
+  (`export default { id, setup }`). V2 does not run V1 plugins.
+
+`hommies setup` asks `opencode --version` and `opencode2 --version` (the V2
+package installs both names) and registers the matching build, removing the
+other. With 1.x and 2.x both installed it registers both: 1.x ignores
+`plugins`, and 2.x skips the 1.x file entry with a warning. Re-run setup after
+upgrading OpenCode across a major version; until then OpenCode 2.x does not
+load Hommies. Both builds give OpenCode the same features as Claude Code:
 
 - **Permissions** (`permission.asked`): Accept replies `once`, Always replies
   `always`, Decline replies `reject`, Cancel leaves the prompt to OpenCode.
 - **Questions** from OpenCode's `question` tool, including multi-select and
-  typed answers.
+  typed answers (V1: `question.asked`; V2: the tool's `form.created` form).
 - **Turn ends** (`session.idle`): plain-text questions become `attention`
   items and anything else becomes `finished`, using the same classifier as the
   `Stop` hooks. Items clear when you send a message, delete the session, or
   interrupt the turn with Esc.
 - **Session names** from OpenCode's generated session title.
-- **Errors and rate limits** (`session.error`): a failed turn becomes a red
-  or orange item instead of a finished one.
-- **Live activity** (`tool.execute.before`): each tool call shows up as a
+- **Errors and rate limits** (V1 `session.error`, V2
+  `session.execution.failed`): a failed turn becomes a red or orange item
+  instead of a finished one.
+- **Live activity** (V1 `tool.execute.before`, V2 the `execute.before` tool
+  hook): each tool call shows up as a
   step, with subagent tool calls listed under the conversation that started
   them.
 - **Desktop notifications**.
@@ -531,7 +544,7 @@ started them, and a subagent finishing is not reported as a finished turn. In
 Claude.
 
 Register the plugin in `~/.config/opencode/opencode.json`, keeping any
-plugins you already have:
+plugins you already have. OpenCode 1.x loads a file from `plugin`:
 
 ```json
 {
@@ -539,10 +552,25 @@ plugins you already have:
 }
 ```
 
-Restart OpenCode after changing the config. The plugin answers OpenCode through
-the in-process client it is given, and it reaches the bridge only through
-`port.json` on loopback. If the bridge is not running, the plugin does nothing,
-and OpenCode behaves as it would without it.
+OpenCode 2.x loads a directory from `plugins` (it rejects a file path, even
+under `plugin`):
+
+```json
+{
+  "plugins": ["file:///absolute/path/to/@thisisayande/hommies/dist/opencode-v2"]
+}
+```
+
+Restart OpenCode after changing the config. The V1 plugin answers OpenCode
+through the in-process client it is given. The V2 plugin answers permissions
+through its plugin context. V2 plugins have no form API, so it answers
+questions through the local OpenCode service's HTTP API, using the loopback URL
+and password the service writes to `$XDG_STATE_HOME/opencode/service.json`. V2
+plugins run in the shared OpenCode service rather than under your terminal, so
+the V2 plugin sends no process ancestry and the bar cannot focus that
+terminal. Both reach the bridge only through `port.json` on loopback. If the
+bridge is not running, the plugin does nothing, and OpenCode behaves as it
+would without it.
 
 ## Omacode integration
 
