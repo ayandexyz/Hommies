@@ -125,10 +125,14 @@ test("turn ends become attention or finished items; subagents, placeholders, and
     await plugin["chat.message"]({ sessionID: "ses_root" }, {});
     await waitFor(request, (value) => value.totalCount === 1);
 
-    // Esc: the interrupted turn is neither a question nor a finished report.
+    // Esc: the interrupted turn is neither a question nor a finished report,
+    // and the session is idle again, not thinking.
+    await plugin["chat.message"]({ sessionID: "ses_fresh" }, {});
     await plugin.event({ event: { type: "session.error", properties: { sessionID: "ses_fresh", error: { name: "MessageAbortedError", data: {} } } } });
     await plugin.event({ event: { type: "session.idle", properties: { sessionID: "ses_fresh" } } });
-    await waitFor(request, (value) => value.totalCount === 0);
+    const interrupted = await waitFor(request, (value) => value.totalCount === 0
+      && value.sessions.find((session) => session.threadId === "ses_fresh")?.steps.at(-1) === "(interrupted)");
+    assert.equal(interrupted.sessions.find((session) => session.threadId === "ses_fresh").state, "idle");
 
     await plugin.event({ event: { type: "session.idle", properties: { sessionID: "ses_fresh" } } });
     await waitFor(request, (value) => value.totalCount === 1);

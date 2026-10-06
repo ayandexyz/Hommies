@@ -188,7 +188,8 @@ export const HommiesOpenCode = async (input: PluginInput) => {
     // Subagents finishing is not the conversation finishing.
     if (!session || session.parentID) return;
     if (aborted.delete(sessionId)) {
-      await resume(sessionId, "UserPromptSubmit");
+      // Idle again with nothing to review; UserPromptSubmit would mark it thinking.
+      await send("/v1/providers/opencode/activity", { ...sessionFields(session), hook_event_name: "StopCancelled" }, turnTimeoutMs);
       return;
     }
     if (failed.delete(sessionId)) return;

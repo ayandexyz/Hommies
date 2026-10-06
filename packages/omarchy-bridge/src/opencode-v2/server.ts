@@ -233,7 +233,9 @@ export async function setup(ctx: PluginContext): Promise<() => Promise<void>> {
     if (!claimEnd(sessionId)) return;
     const session = await getSession(sessionId);
     if (!session || session.parentID) return;
-    await resume(sessionId, "UserPromptSubmit");
+    // Idle again with nothing to review. Not UserPromptSubmit: that would mark it
+    // thinking, and closing OpenCode mid-turn interrupts the turn this way.
+    await sendToBridge("/v1/providers/opencode/activity", { ...sessionFields(session), hook_event_name: "StopCancelled" }, turnTimeoutMs);
   };
 
   const onSucceeded = async (sessionId: string): Promise<void> => {
