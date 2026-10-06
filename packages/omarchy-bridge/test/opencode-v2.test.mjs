@@ -146,7 +146,11 @@ test("turn ends become attention or finished items; subagents, placeholders, int
     emit({ type: "session.idle", data: { sessionID: "ses_fresh" } });
     await waitFor(request, (value) => value.totalCount === 0);
     await new Promise((resolve) => setTimeout(resolve, 50));
-    assert.equal((await waitFor(request, () => true)).totalCount, 0);
+    const interrupted = await waitFor(request, () => true);
+    assert.equal(interrupted.totalCount, 0);
+    // Closing OpenCode mid-turn interrupts it: the row must go idle, not keep thinking.
+    const fresh = interrupted.sessions.find((session) => session.threadId === "ses_fresh");
+    assert.deepEqual([fresh.state, fresh.steps.at(-1)], ["idle", "(interrupted)"]);
 
     turn("ses_fresh", "failed", { error: { type: "api", message: "Too many requests", status: 429 } });
     const failed = await waitFor(request, (value) => value.totalCount === 1);
