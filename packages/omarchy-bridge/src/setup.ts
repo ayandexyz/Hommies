@@ -8,10 +8,11 @@
  * replaces stale paths instead of duplicating them, and uninstall removes only
  * what setup added. Every changed file is backed up and replaced atomically.
  */
+import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { copyFile, lstat, mkdir, readFile, readlink, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
+import { access, constants, copyFile, lstat, mkdir, readFile, readlink, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { basename, delimiter, dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 export type SetupProvider = "claude" | "codex" | "opencode" | "gemini" | "antigravity" | "grok";
@@ -197,12 +198,48 @@ export function commandHookFingerprint(config: JsonObject, hookFile: string): st
   return lines.sort();
 }
 
+/**
+ * OpenCode V1 loads plugin files from `plugin`; V2 loads plugin directories
+ * from `plugins` (and skips files, even under the legacy `plugin` key, with a
+ * warning). V1 ignores `plugins`, so `both` serves a machine that has both
+ * (`@opencode/cli` installs V2 as `opencode2` beside an existing `opencode`).
+ */
+export type OpenCodeFlavor = "v1" | "v2" | "both";
+
+/** Plugin URLs to register under each key; an empty object registers none. */
+export interface OpenCodeEntries {
+  readonly plugin?: string;
+  readonly plugins?: string;
+}
+
+const isOurOpenCodeV1Entry = (entry: unknown): entry is string =>
+  typeof entry === "string" && entry.endsWith("/opencode-plugin.js") && OUR_PATH.test(entry);
+
+const isOurOpenCodeV2Entry = (entry: unknown): entry is string =>
+  typeof entry === "string" && /\/opencode-v2\/?$/.test(entry) && OUR_PATH.test(entry);
+
+const listOf = (value: unknown): unknown[] => Array.isArray(value) ? value : [];
+
+/** Our entries under both keys, tagged with the key, so a V1 entry never matches a V2 one. */
 export function openCodeFingerprint(config: JsonObject): string[] {
-  const plugins = Array.isArray(config.plugin) ? config.plugin : [];
-  return plugins
-    .filter((entry: unknown): entry is string =>
-      typeof entry === "string" && entry.endsWith("/opencode-plugin.js") && OUR_PATH.test(entry))
-    .sort();
+  return [
+    ...listOf(config.plugin).filter(isOurOpenCodeV1Entry).map((entry) => `plugin ${entry}`),
+    ...listOf(config.plugins).filter(isOurOpenCodeV2Entry).map((entry) => `plugins ${entry}`),
+  ].sort();
+}
+
+/** The flavor of the Hommies entries already in a config; V1 when there are none. */
+export function openCodeFlavorIn(config: JsonObject): OpenCodeFlavor {
+  const v1 = listOf(config.plugin).some(isOurOpenCodeV1Entry);
+  const v2 = listOf(config.plugins).some(isOurOpenCodeV2Entry);
+  return v1 && v2 ? "both" : v2 ? "v2" : "v1";
+}
+
+/** The flavor for the OpenCode majors found on PATH; `null` when none was found. */
+export function openCodeFlavorFor(majors: ReadonlyArray<number>): OpenCodeFlavor | null {
+  const v1 = majors.some((major) => major < 2);
+  const v2 = majors.some((major) => major >= 2);
+  return v1 && v2 ? "both" : v2 ? "v2" : v1 ? "v1" : null;
 }
 
 export const mergeClaudeSettings = (config: JsonObject, command: string | null): JsonObject =>
@@ -246,17 +283,57 @@ export function mergeAntigravityHooks(config: JsonObject, hookPath: string | nul
 export const antigravityFingerprint = (config: JsonObject): string[] =>
   ANTIGRAVITY_HOOK_NAME in config ? [JSON.stringify(config[ANTIGRAVITY_HOOK_NAME])] : [];
 
-/** Returns a copy of an OpenCode config with our plugin entry replaced (or removed when `pluginUrl` is null). */
-export function mergeOpenCodeConfig(config: JsonObject, pluginUrl: string | null): JsonObject {
+/**
+ * Returns a copy of an OpenCode config with our entries replaced by `entries`
+ * (`{}` removes them). Our entries under both keys are always dropped first, so
+ * upgrading OpenCode and re-running setup swaps V1 for V2.
+ */
+export function mergeOpenCodeConfig(config: JsonObject, entries: OpenCodeEntries): JsonObject {
   const next: JsonObject = { ...config };
-  const plugins = Array.isArray(config.plugin) ? config.plugin : [];
-  const kept = plugins.filter((entry: unknown) =>
-    !(typeof entry === "string" && entry.endsWith("/opencode-plugin.js") && OUR_PATH.test(entry)));
-  if (pluginUrl === null && kept.length === plugins.length) return config;
-  if (pluginUrl !== null) kept.push(pluginUrl);
-  if (kept.length === 0) delete next.plugin;
-  else next.plugin = kept;
-  return next;
+  let changed = false;
+  for (const [key, isOurs] of [["plugin", isOurOpenCodeV1Entry], ["plugins", isOurOpenCodeV2Entry]] as const) {
+    const current = listOf(config[key]);
+    const kept = current.filter((entry) => !isOurs(entry));
+    const add = entries[key];
+    if (add === undefined && kept.length === current.length) continue;
+    changed = true;
+    if (add !== undefined) kept.push(add);
+    if (kept.length === 0) delete next[key];
+    else next[key] = kept;
+  }
+  return changed ? next : config;
+}
+
+/** The major version a binary's `--version` prints, or `null` when it does not run. */
+function versionMajor(binary: string, env: Readonly<Record<string, string | undefined>>): Promise<number | null> {
+  return new Promise((resolve) => {
+    execFile(binary, ["--version"], { env: { ...env }, timeout: 10_000 }, (error, stdout) => {
+      // `1.18.31` (V1) or `opencode v2.0.24` (V2); anything else is not OpenCode.
+      const match = error === null ? /^\s*(?:opencode\s+)?v?(\d+)\.\d+\.\d+\s*$/.exec(stdout) : null;
+      resolve(match === null ? null : Number(match[1]));
+    });
+  });
+}
+
+/**
+ * OpenCode majors installed on `env.PATH`. Every `opencode` and `opencode2`
+ * (V2's alias) is asked, not only the first: installing V2 from npm can put
+ * its `opencode` ahead of a V1 that is still installed and still used.
+ */
+export async function detectOpenCodeMajors(env: Readonly<Record<string, string | undefined>>): Promise<number[]> {
+  if (!env.PATH) return [];
+  // Each candidate runs by its own path: a version-manager shim resolves to the
+  // manager's binary, which picks the tool from the name it was called by.
+  const binaries = new Set<string>();
+  for (const directory of new Set(env.PATH.split(delimiter))) {
+    if (directory === "") continue;
+    for (const name of ["opencode", "opencode2"]) {
+      const candidate = join(directory, name);
+      if (await access(candidate, constants.X_OK).then(() => true, () => false)) binaries.add(candidate);
+    }
+  }
+  const majors = await Promise.all([...binaries].map((binary) => versionMajor(binary, env)));
+  return [...new Set(majors.filter((major): major is number => major !== null))].sort();
 }
 
 export interface SetupEnvironment {
@@ -264,6 +341,8 @@ export interface SetupEnvironment {
   readonly env: Readonly<Record<string, string | undefined>>;
   /** Directory holding the compiled hook files; defaults to this module's directory. */
   readonly distDir?: string;
+  /** OpenCode majors installed; defaults to asking `opencode` and `opencode2` on `env.PATH`. */
+  readonly openCodeMajors?: () => Promise<ReadonlyArray<number>>;
 }
 
 export interface SetupOptions {
@@ -287,7 +366,8 @@ interface ProviderTarget {
   /** The agent's config directory; its absence means the agent is not installed. */
   readonly configDir: string;
   readonly file: string;
-  readonly merge: (config: JsonObject, install: boolean) => JsonObject;
+  /** `openCode` picks the OpenCode entry shape; without it, the shape already in the config is kept. */
+  readonly merge: (config: JsonObject, install: boolean, openCode?: OpenCodeFlavor) => JsonObject;
   /** Our entries in a config; see `commandHookFingerprint`. */
   readonly fingerprint: (config: JsonObject) => string[];
   /** Config variants setup cannot edit safely; when one exists the provider is skipped. */
@@ -323,8 +403,10 @@ function targets(environment: SetupEnvironment): ReadonlyArray<ProviderTarget> {
       configDir: openCodeDir,
       file: join(openCodeDir, "opencode.json"),
       unsupported: join(openCodeDir, "opencode.jsonc"),
-      merge: (config, install) =>
-        mergeOpenCodeConfig(config, install ? pathToFileURL(join(distDir, "opencode-plugin.js")).href : null),
+      merge: (config, install, openCode = openCodeFlavorIn(config)) => mergeOpenCodeConfig(config, !install ? {} : {
+        ...(openCode === "v2" ? {} : { plugin: pathToFileURL(join(distDir, "opencode-plugin.js")).href }),
+        ...(openCode === "v1" ? {} : { plugins: pathToFileURL(join(distDir, "opencode-v2")).href }),
+      }),
       fingerprint: openCodeFingerprint,
     },
     {
@@ -392,6 +474,12 @@ async function writeConfig(path: string, config: JsonObject, backupSuffix: strin
 export async function runSetup(options: SetupOptions, environment: SetupEnvironment): Promise<ReadonlyArray<SetupResult>> {
   const backupSuffix = new Date().toISOString().replace(/[:.]/g, "-");
   const results: SetupResult[] = [];
+  let openCode: OpenCodeFlavor | undefined;
+  if (!options.uninstall && options.providers.includes("opencode")) {
+    const majors = await (environment.openCodeMajors ?? (() => detectOpenCodeMajors(environment.env)))();
+    // Unknown (not on PATH): keep whatever is configured, V1 for a fresh config.
+    openCode = openCodeFlavorFor(majors) ?? undefined;
+  }
   for (const target of targets(environment)) {
     if (!options.providers.includes(target.provider)) continue;
     const { provider, file } = target;
@@ -410,7 +498,7 @@ export async function runSetup(options: SetupOptions, environment: SetupEnvironm
         continue;
       }
       const before = current ?? {};
-      const after = target.merge(before, !options.uninstall);
+      const after = target.merge(before, !options.uninstall, openCode);
       if (current !== null && JSON.stringify(before) === JSON.stringify(after)) {
         results.push({ provider, file, status: "unchanged", message: "already up to date" });
         continue;

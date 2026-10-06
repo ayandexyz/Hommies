@@ -14,6 +14,7 @@
  */
 import { editStats } from "./edit-stats.js";
 import { postToBridge, readConnection } from "./hook-common.js";
+import { answersOf, decisionOf, hookTimeoutMs, isRecord, placeholderTitle, stepDetail, turnTimeoutMs } from "./opencode-common.js";
 import { processFields, type ProcessFields } from "./process-tree.js";
 
 interface RequestOptions {
@@ -45,11 +46,6 @@ interface SessionInfo {
   readonly title?: string;
   readonly parentID?: string;
 }
-
-const hookTimeoutMs = 5 * 60 * 1000 + 5_000;
-const turnTimeoutMs = 2_000;
-/** OpenCode names sessions like this until it has generated a title. */
-const placeholderTitle = /^(New|Child) session - \d{4}-\d{2}-\d{2}T/;
 
 export const HommiesOpenCode = async (input: PluginInput) => {
   const http = input.client._client;
@@ -262,10 +258,6 @@ export const HommiesOpenCode = async (input: PluginInput) => {
   };
 };
 
-function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
-  return value !== null && typeof value === "object";
-}
-
 function isSession(value: unknown): value is SessionInfo {
   return isRecord(value) && typeof value.id === "string";
 }
@@ -282,23 +274,6 @@ function permissionDetail(request: Readonly<Record<string, unknown>>): Record<st
   };
 }
 
-/** OpenCode tool args use camelCase; the bridge labels steps from these snake_case fields. */
-function stepDetail(args: unknown): Record<string, string> {
-  if (!isRecord(args)) return {};
-  const fields: Record<string, unknown> = {
-    command: args.command,
-    file_path: args.filePath ?? args.file_path,
-    path: args.path,
-    pattern: args.pattern,
-    query: args.query,
-    url: args.url,
-    description: args.description,
-  };
-  const detail: Record<string, string> = {};
-  for (const [key, value] of Object.entries(fields)) if (typeof value === "string") detail[key] = value.slice(0, 300);
-  return detail;
-}
-
 /** Maps an OpenCode session error to the bridge's (Claude's) failure names. */
 function failureName(error: Readonly<Record<string, unknown>>, data: Readonly<Record<string, unknown>>): string {
   if (error.name === "ProviderAuthError") return "authentication_failed";
@@ -309,21 +284,6 @@ function failureName(error: Readonly<Record<string, unknown>>, data: Readonly<Re
     if (typeof data.statusCode === "number" && data.statusCode >= 500) return "server_error";
   }
   return "unknown";
-}
-
-function decisionOf(result: unknown): "allow" | "always" | "deny" | null {
-  if (!isRecord(result) || !isRecord(result.hookSpecificOutput)) return null;
-  const decision = result.hookSpecificOutput.decision;
-  if (!isRecord(decision)) return null;
-  if (decision.behavior === "allow") return decision.remember === true ? "always" : "allow";
-  return decision.behavior === "deny" ? "deny" : null;
-}
-
-function answersOf(result: unknown): string[][] | null {
-  if (!isRecord(result) || !Array.isArray(result.answers)) return null;
-  const answers = result.answers.filter((answer): answer is string[] =>
-    Array.isArray(answer) && answer.every((label) => typeof label === "string"));
-  return answers.length === result.answers.length ? answers : null;
 }
 
 /** Text of the final assistant message; `null` when the turn ended without any. */

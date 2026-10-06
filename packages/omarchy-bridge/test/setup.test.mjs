@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import { lstat, mkdir, mkdtemp, readdir, readFile, readlink, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, readdir, readFile, readlink, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { isHommiesCommand, linkBridgeCommand, mergeClaudeSettings, mergeOpenCodeConfig, runSetup } from "../dist/setup.js";
+import { checkHooks, detectOpenCodeMajors, isHommiesCommand, linkBridgeCommand, mergeClaudeSettings, mergeOpenCodeConfig, runSetup } from "../dist/setup.js";
 
 const install = { uninstall: false, dryRun: false, providers: ["claude", "codex", "opencode"] };
 const uninstall = { ...install, uninstall: true };
@@ -56,14 +56,87 @@ test("uninstall leaves configs without our entries untouched", () => {
   const settings = { hooks: {} };
   assert.equal(mergeClaudeSettings(settings, null), settings);
   const openCode = { plugin: [] };
-  assert.equal(mergeOpenCodeConfig(openCode, null), openCode);
+  assert.equal(mergeOpenCodeConfig(openCode, {}), openCode);
 });
 
 test("OpenCode keeps other plugins and swaps our entry", () => {
   const config = { plugin: ["opencode-foo", "file:///old/@agent-fold/bridge/dist/opencode-plugin.js"] };
-  assert.deepEqual(mergeOpenCodeConfig(config, "file:///opt/hommies/dist/opencode-plugin.js").plugin,
+  assert.deepEqual(mergeOpenCodeConfig(config, { plugin: "file:///opt/hommies/dist/opencode-plugin.js" }).plugin,
     ["opencode-foo", "file:///opt/hommies/dist/opencode-plugin.js"]);
-  assert.deepEqual(mergeOpenCodeConfig(config, null), { plugin: ["opencode-foo"] });
+  assert.deepEqual(mergeOpenCodeConfig(config, {}), { plugin: ["opencode-foo"] });
+});
+
+test("OpenCode V2 gets a plugin directory under plugins, replacing our V1 file entry", () => {
+  const config = { plugin: ["opencode-foo", "file:///old/hommies/dist/opencode-plugin.js"], plugins: ["./my-plugin"] };
+  assert.deepEqual(mergeOpenCodeConfig(config, { plugins: "file:///opt/hommies/dist/opencode-v2" }),
+    { plugin: ["opencode-foo"], plugins: ["./my-plugin", "file:///opt/hommies/dist/opencode-v2"] });
+  // Downgrading swaps it back.
+  const v2 = { plugins: ["file:///opt/hommies/dist/opencode-v2"] };
+  assert.deepEqual(mergeOpenCodeConfig(v2, { plugin: "file:///opt/hommies/dist/opencode-plugin.js" }),
+    { plugin: ["file:///opt/hommies/dist/opencode-plugin.js"] });
+  assert.deepEqual(mergeOpenCodeConfig(v2, {}), {});
+});
+
+test("setup registers the OpenCode V2 plugin when OpenCode 2 is installed, and checks it without asking OpenCode", async () => {
+  await withHome(async ({ home, environment }) => {
+    await mkdir(join(home, ".config", "opencode"), { recursive: true });
+    const file = join(home, ".config", "opencode", "opencode.json");
+    await writeFile(file, JSON.stringify({ plugin: ["file:///old/hommies/dist/opencode-plugin.js"] }));
+    const v2 = { ...environment, openCodeMajors: async () => [2] };
+    const only = { ...install, providers: ["opencode"] };
+
+    assert.deepEqual((await runSetup(only, v2)).map((result) => result.status), ["updated"]);
+    assert.deepEqual(await readJson(file), { plugins: ["file:///opt/hommies/dist/opencode-v2"] });
+    assert.deepEqual((await runSetup(only, v2)).map((result) => result.status), ["unchanged"]);
+    // Without a version (OpenCode not on PATH), the configured flavor is kept.
+    assert.deepEqual((await runSetup(only, environment)).map((result) => result.status), ["unchanged"]);
+    assert.deepEqual((await checkHooks(environment, ["opencode"])).map((check) => check.status), ["current"]);
+
+    await runSetup({ ...only, uninstall: true }, v2);
+    assert.deepEqual(await readJson(file), {});
+    assert.deepEqual((await checkHooks(environment, ["opencode"])).map((check) => check.status), ["missing"]);
+  });
+});
+
+test("every OpenCode on PATH is asked, so a 1.x hidden behind a 2.x still counts", async () => {
+  await withHome(async ({ home }) => {
+    const bin = async (dir, name, output) => {
+      await mkdir(join(home, dir), { recursive: true });
+      await writeFile(join(home, dir, name), `#!/bin/sh\necho '${output}'\n`);
+      await chmod(join(home, dir, name), 0o755);
+    };
+    await bin("npm", "opencode", "opencode v2.0.24");
+    await bin("npm", "opencode2", "opencode v2.0.24");
+    await bin("pacman", "opencode", "1.18.29");
+    // A shim of a tool that is not OpenCode, printing its own version.
+    await bin("shims", "opencode", "2026.10.1 linux-x64");
+    const PATH = ["npm", "shims", "pacman"].map((dir) => join(home, dir)).join(":");
+    assert.deepEqual(await detectOpenCodeMajors({ PATH }), [1, 2]);
+    assert.deepEqual(await detectOpenCodeMajors({ PATH: join(home, "shims") }), []);
+    assert.deepEqual(await detectOpenCodeMajors({}), []);
+  });
+});
+
+test("with OpenCode 1.x and 2.x both installed, setup registers both plugins", async () => {
+  await withHome(async ({ home, environment }) => {
+    await mkdir(join(home, ".config", "opencode"), { recursive: true });
+    const file = join(home, ".config", "opencode", "opencode.json");
+    await writeFile(file, JSON.stringify({ plugin: ["opencode-foo", "file:///old/hommies/dist/opencode-plugin.js"] }));
+    const both = { ...environment, openCodeMajors: async () => [1, 2] };
+    const only = { ...install, providers: ["opencode"] };
+
+    assert.deepEqual((await runSetup(only, both)).map((result) => result.status), ["updated"]);
+    assert.deepEqual(await readJson(file), {
+      plugin: ["opencode-foo", "file:///opt/hommies/dist/opencode-plugin.js"],
+      plugins: ["file:///opt/hommies/dist/opencode-v2"],
+    });
+    assert.deepEqual((await runSetup(only, both)).map((result) => result.status), ["unchanged"]);
+    assert.deepEqual((await checkHooks(environment, ["opencode"])).map((check) => check.status), ["current"]);
+
+    // Removing 1.x later drops the V1 entry on the next setup.
+    await runSetup(only, { ...environment, openCodeMajors: async () => [2] });
+    assert.deepEqual(await readJson(file), { plugin: ["opencode-foo"], plugins: ["file:///opt/hommies/dist/opencode-v2"] });
+  });
 });
 
 test("setup writes each installed agent's config, backs up, and uninstall restores it", async () => {
