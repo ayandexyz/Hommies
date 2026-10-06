@@ -562,7 +562,7 @@ It reads `$XDG_DATA_HOME/hommies/port.json` on every report, so it follows a
 restarted bridge, and does nothing when the bridge is not running. Like the
 hooks, it only sends once the port is held by your own user and only trusts
 replies signed with the bridge's `serverKey` (see `bridge-identity.ts`).
-This needs Omacode 0.43.2 or later; older builds read `agent-fold/port.json`,
+This needs Omacode from `main` at `d6ded5c` or later; older builds read `agent-fold/port.json`,
 which the bridge no longer writes, so they fall back to Omacode's own prompt. `FREECODE_AGENT_FOLD=0` turns it off.
 A headless `freecode run` never reports.
 
