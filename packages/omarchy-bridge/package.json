@@ -1,6 +1,6 @@
 {
   "name": "@thisisayande/hommies",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Localhost bridge and agent hooks for Hommies, the Omarchy companion that surfaces pending coding-agent questions and permissions.",
   "license": "MIT",
   "author": "Ayan De",
