@@ -10,7 +10,7 @@
  * v0 scaffold: argv parsing and `dataDir` creation only.
  */
 
-import { mkdir } from "node:fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 
 import { createDesktopNotifier } from "./notifier.js";
@@ -47,16 +47,20 @@ function parseArgs(argv: ReadonlyArray<string>): RuntimeOptions {
   };
 }
 
-/** Readers from before the rename look in `agent-fold`, next to the `hommies` folder. */
-const legacyDataDirs = (dataDir: string): string[] =>
-  basename(dataDir) === "hommies" ? [join(dirname(dataDir), "agent-fold")] : [];
+/**
+ * Bridges before 0.2.2 also wrote `agent-fold/port.json`, which older Omacode
+ * builds trust without checking who holds the port. A crash could leave it
+ * pointing at a freed port, so it is removed and never written again.
+ */
+const removeLegacyPortFile = (dataDir: string): Promise<void> =>
+  basename(dataDir) === "hommies" ? rm(join(dirname(dataDir), "agent-fold", "port.json"), { force: true }) : Promise.resolve();
 
 async function main(): Promise<void> {
   const options = parseArgs(process.argv.slice(2));
   await mkdir(options.dataDir, { recursive: true });
+  await removeLegacyPortFile(options.dataDir);
   const server = await startBridgeServer({
     dataDir: options.dataDir,
-    legacyDataDirs: legacyDataDirs(options.dataDir),
     port: options.port,
     host: options.host,
     ...(options.notify ? { notify: createDesktopNotifier() } : {}),

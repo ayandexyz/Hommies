@@ -247,7 +247,7 @@ export async function startBridgeServer(
   const address = server.address();
   if (address === null || typeof address === "string") throw new Error("Hommies bridge did not receive a TCP address");
   const connection = JSON.stringify({ port: address.port, token: state.token, version: 1, pid: process.pid, serverKey: state.serverKey }, null, 2);
-  const portFiles = [options.dataDir, ...(options.legacyDataDirs ?? [])].map((dir) => join(dir, "port.json"));
+  const portFiles = [join(options.dataDir, "port.json")];
   for (const file of portFiles) {
     await mkdir(dirname(file), { recursive: true });
     await writeFile(file, connection, { encoding: "utf8", mode: 0o600 });

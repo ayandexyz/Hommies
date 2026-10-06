@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -21,20 +21,6 @@ test("the bridge accepts the token under the old header name", async () => {
     const wrong = await fetch(`${url}/v1/pending`, { headers: { "x-hommies-token": "nope", "x-agent-fold-token": "nope" } });
     assert.equal(wrong.status, 401);
   });
-});
-
-test("port.json is mirrored into the legacy folders, owner-only", async () => {
-  const root = await mkdtemp(join(tmpdir(), "hommies-legacy-mirror-"));
-  try {
-    const legacy = join(root, "agent-fold");
-    await withServer({ dataDir: join(root, "hommies"), legacyDataDirs: [legacy] }, async ({ dataDir }) => {
-      const current = await readFile(join(dataDir, "port.json"), "utf8");
-      assert.equal(await readFile(join(legacy, "port.json"), "utf8"), current);
-      assert.equal((await stat(join(legacy, "port.json"))).mode & 0o777, 0o600);
-    });
-  } finally {
-    await rm(root, { recursive: true, force: true });
-  }
 });
 
 test("hooks find the bridge in the hommies folder, then the agent-fold one", async () => {

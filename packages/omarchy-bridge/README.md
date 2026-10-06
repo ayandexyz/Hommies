@@ -96,13 +96,13 @@ it from `opencode.json` by hand.
 
 ### Renamed from agent-fold
 
-Hommies was called agent-fold. The old names keep working, so existing hooks,
-Omacode's built-in integration, and older plugin copies need no changes:
+Hommies was called agent-fold. The old names keep working, so existing hooks
+and older plugin copies need no changes:
 
 | Now | Before the rename (still accepted) |
 | --- | --- |
 | `hommies`, `hommies-bridge`, `hommies-hook`, `hommies-claude-hook`, `hommies-codex-hook` | the same commands named `agent-fold*` |
-| `$XDG_DATA_HOME/hommies/` | `$XDG_DATA_HOME/agent-fold/`: the bridge also writes `port.json` there, and hooks look there when the new folder has none |
+| `$XDG_DATA_HOME/hommies/` | `$XDG_DATA_HOME/agent-fold/`: hooks look there for `port.json` when the new folder has none. Since 0.2.2 the bridge no longer writes it there, and deletes a leftover copy on start |
 | `x-hommies-token` header | `x-agent-fold-token` |
 | `HOMMIES_DATA_DIR`, `HOMMIES_AGENT` | `AGENT_FOLD_DATA_DIR`, `AGENT_FOLD_AGENT` |
 | `<file>.hommies-backup-<time>` | `<file>.agent-fold-backup-<time>` (older backups keep their names) |
@@ -558,8 +558,12 @@ Omacode does not report [live activity](#live-activity) yet; the
 `/v1/providers/omacode/activity` route is ready for it.
 
 Omacode keeps showing its own prompt, and whichever surface answers first wins.
-It reads `port.json` on every report, so it follows a restarted bridge, and does
-nothing when the bridge is not running. `FREECODE_AGENT_FOLD=0` turns it off.
+It reads `$XDG_DATA_HOME/hommies/port.json` on every report, so it follows a
+restarted bridge, and does nothing when the bridge is not running. Like the
+hooks, it only sends once the port is held by your own user and only trusts
+replies signed with the bridge's `serverKey` (see `bridge-identity.ts`).
+This needs Omacode 0.43.2 or later; older builds read `agent-fold/port.json`,
+which the bridge no longer writes, so they fall back to Omacode's own prompt. `FREECODE_AGENT_FOLD=0` turns it off.
 A headless `freecode run` never reports.
 
 ## Gemini CLI, Antigravity, and Grok Build

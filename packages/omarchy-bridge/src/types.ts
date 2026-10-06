@@ -16,11 +16,6 @@ import type { BridgeSoundPlayer } from "./sound.js";
  */
 export interface BridgeServerOptions {
   readonly dataDir: string;
-  /**
-   * Folders that also get a copy of `port.json`, for readers from before the
-   * rename to Hommies (Omacode reads `$XDG_DATA_HOME/agent-fold/port.json`).
-   */
-  readonly legacyDataDirs?: ReadonlyArray<string>;
   readonly port: number;
   readonly host?: string;
   /**
