@@ -9,7 +9,7 @@
  * what setup added. Every changed file is backed up and replaced atomically.
  */
 import { randomBytes } from "node:crypto";
-import { copyFile, lstat, mkdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
+import { copyFile, lstat, mkdir, readFile, readlink, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -428,6 +428,49 @@ export async function runSetup(options: SetupOptions, environment: SetupEnvironm
     }
   }
   return results;
+}
+
+/** Marks the launcher as ours, so re-running setup may replace it and uninstall may remove it. */
+const LAUNCHER_MARK = "# Written by `hommies setup`";
+
+/**
+ * The Omarchy plugin starts `hommies-bridge` from the shell's PATH, which has
+ * `~/.local/bin` but neither a version manager's global bin (nvm, fnm, volta)
+ * nor, always, `node`. So setup writes a launcher there that runs the bridge
+ * with the Node that ran setup. Our launcher, or a link of ours from older
+ * installs, is replaced; anything else there is the user's and left alone.
+ */
+export async function linkBridgeCommand(
+  options: Pick<SetupOptions, "uninstall" | "dryRun">,
+  environment: SetupEnvironment & { readonly nodePath?: string },
+): Promise<{ readonly status: SetupStatus; readonly file: string; readonly message: string }> {
+  const distDir = environment.distDir ?? dirname(fileURLToPath(import.meta.url));
+  const launcherPath = join(environment.home, ".local", "bin", "hommies-bridge");
+  const launcher = `#!/bin/sh\n${LAUNCHER_MARK}; \`hommies uninstall\` removes it.\n` +
+    `exec ${shellQuote(environment.nodePath ?? process.execPath)} ${shellQuote(join(distDir, "runtime.js"))} "$@"\n`;
+  const existing = await lstat(launcherPath).catch(() => null);
+  let current: string | null = null;
+  if (existing?.isSymbolicLink() === true) {
+    // A dangling link (package removed or moved) is judged by where it points.
+    const target = await realpath(launcherPath).catch(() => readlink(launcherPath));
+    if (!(OUR_PATH.test(target) && target.endsWith("runtime.js"))) {
+      return { status: "skipped", file: launcherPath, message: "left your own link in place" };
+    }
+  } else if (existing !== null) {
+    current = await readFile(launcherPath, "utf8").catch(() => "");
+    if (!current.includes(LAUNCHER_MARK)) return { status: "skipped", file: launcherPath, message: "left your own file in place" };
+  }
+  if (options.uninstall) {
+    if (existing === null) return { status: "unchanged", file: launcherPath, message: "no bridge launcher" };
+    if (!options.dryRun) await rm(launcherPath, { force: true });
+    return { status: "updated", file: launcherPath, message: options.dryRun ? "would have removed the bridge launcher" : "removed the bridge launcher" };
+  }
+  if (current === launcher) return { status: "unchanged", file: launcherPath, message: "bridge launcher already up to date" };
+  if (options.dryRun) return { status: "updated", file: launcherPath, message: "would have written the bridge launcher" };
+  await mkdir(dirname(launcherPath), { recursive: true });
+  await rm(launcherPath, { force: true });
+  await writeFile(launcherPath, launcher, { mode: 0o755 });
+  return { status: "updated", file: launcherPath, message: "wrote the bridge launcher for the Omarchy plugin" };
 }
 
 /**

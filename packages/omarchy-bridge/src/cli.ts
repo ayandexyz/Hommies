@@ -2,7 +2,7 @@
 /** `hommies` CLI (`agent-fold` is the alias from before the rename): registers or removes the agent hooks that report to the bridge. */
 import { multiselect, type Choice } from "./multiselect.js";
 import {
-  checkHooks, defaultSetupEnvironment, runSetup, SETUP_PROVIDERS, type HookCheck, type SetupProvider, type SetupResult,
+  checkHooks, defaultSetupEnvironment, linkBridgeCommand, runSetup, SETUP_PROVIDERS, type HookCheck, type SetupProvider, type SetupResult,
 } from "./setup.js";
 
 const USAGE = `Usage: hommies <command> [options]
@@ -135,7 +135,11 @@ async function main(): Promise<void> {
   }
   const results = await runSetup({ uninstall, dryRun, providers }, defaultSetupEnvironment());
   report(results, uninstall);
-  if (results.some((result) => result.status === "error")) process.exitCode = 1;
+  const link = await linkBridgeCommand({ uninstall, dryRun }, defaultSetupEnvironment())
+    .catch((error: unknown) => ({ status: "error" as const, file: "~/.local/bin/hommies-bridge", message: `not linked: ${error instanceof Error ? error.message : String(error)}` }));
+  const mark = { updated: "✓", unchanged: "=", skipped: "-", error: "✗" }[link.status];
+  process.stdout.write(`${mark} ${"bridge".padEnd(11)} ${link.message} (${link.file})\n`);
+  if (results.some((result) => result.status === "error") || link.status === "error") process.exitCode = 1;
 }
 
 void main();

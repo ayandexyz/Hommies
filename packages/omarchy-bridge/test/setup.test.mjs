@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readdir, readFile, readlink, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { isHommiesCommand, mergeClaudeSettings, mergeOpenCodeConfig, runSetup } from "../dist/setup.js";
+import { isHommiesCommand, linkBridgeCommand, mergeClaudeSettings, mergeOpenCodeConfig, runSetup } from "../dist/setup.js";
 
 const install = { uninstall: false, dryRun: false, providers: ["claude", "codex", "opencode"] };
 const uninstall = { ...install, uninstall: true };
@@ -122,5 +122,42 @@ test("a symlinked config is updated through the link", async () => {
     await runSetup({ ...install, providers: ["codex"] }, environment);
     const hooks = (await readJson(real)).hooks;
     assert.deepEqual(hooks.PermissionRequest, [{ matcher: "*", hooks: [{ type: "command", command: "test -f /opt/hommies/dist/codex-hook.js && node /opt/hommies/dist/codex-hook.js || true", timeout: 305 }] }]);
+  });
+});
+
+test("setup writes a hommies-bridge launcher in ~/.local/bin and uninstall removes only its own", async () => {
+  await withHome(async ({ home }) => {
+    const dist = join(home, "nvm", "lib", "node_modules", "@thisisayande", "hommies", "dist");
+    await mkdir(dist, { recursive: true });
+    await writeFile(join(dist, "runtime.js"), "");
+    const environment = { home, env: {}, distDir: dist, nodePath: "/opt/node 24/bin/node" };
+    const launcher = join(home, ".local", "bin", "hommies-bridge");
+    const run = (uninstall) => linkBridgeCommand({ uninstall, dryRun: false }, environment);
+
+    assert.equal((await run(false)).status, "updated");
+    const text = await readFile(launcher, "utf8");
+    assert.match(text, /^#!\/bin\/sh\n/);
+    assert.ok(text.includes(`exec '/opt/node 24/bin/node' ${join(dist, "runtime.js")} "$@"`), "absolute node, quoted");
+    assert.equal((await lstat(launcher)).mode & 0o777, 0o755);
+    assert.equal((await run(false)).status, "unchanged");
+
+    // A link from an older install, even dangling, is replaced.
+    await rm(launcher);
+    await symlink(join(home, "gone", "hommies", "dist", "runtime.js"), launcher);
+    assert.equal((await run(false)).status, "updated");
+    assert.ok((await lstat(launcher)).isFile());
+
+    assert.equal((await run(true)).status, "updated");
+    assert.equal(await lstat(launcher).catch(() => null), null);
+
+    // The user's own file or link is never touched.
+    await writeFile(launcher, "#!/bin/sh\n");
+    assert.equal((await run(false)).status, "skipped");
+    assert.equal((await run(true)).status, "skipped");
+    assert.equal(await readFile(launcher, "utf8"), "#!/bin/sh\n");
+    await rm(launcher);
+    await symlink("/opt/elsewhere/bridge", launcher);
+    assert.equal((await run(false)).status, "skipped");
+    assert.equal(await readlink(launcher), "/opt/elsewhere/bridge");
   });
 });

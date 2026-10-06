@@ -81,6 +81,13 @@ date, in `hooksConnected`. The panel shows a tab only for those agents and for
 any agent that has reported a session or item (Omacode, which needs no setup,
 and custom agents). Until one qualifies, it shows all four built-in tabs.
 
+Setup also writes `~/.local/bin/hommies-bridge`, a two-line launcher that runs
+the bridge with the Node that ran setup. The Omarchy plugin starts the bridge
+from the shell's PATH, which has `~/.local/bin` but not a version manager's
+global bin (nvm, fnm, volta), so without it the bar never finds the bridge. A
+`hommies-bridge` there that setup did not write is left alone. Re-run setup
+after switching Node versions so the launcher follows.
+
 To remove everything setup added:
 
 ```sh
