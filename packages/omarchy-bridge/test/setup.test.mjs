@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import { lstat, mkdir, mkdtemp, readdir, readFile, readlink, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, readdir, readFile, readlink, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { checkHooks, isHommiesCommand, linkBridgeCommand, mergeClaudeSettings, mergeOpenCodeConfig, runSetup } from "../dist/setup.js";
+import { checkHooks, detectOpenCodeMajors, isHommiesCommand, linkBridgeCommand, mergeClaudeSettings, mergeOpenCodeConfig, runSetup } from "../dist/setup.js";
 
 const install = { uninstall: false, dryRun: false, providers: ["claude", "codex", "opencode"] };
 const uninstall = { ...install, uninstall: true };
@@ -95,6 +95,25 @@ test("setup registers the OpenCode V2 plugin when OpenCode 2 is installed, and c
     await runSetup({ ...only, uninstall: true }, v2);
     assert.deepEqual(await readJson(file), {});
     assert.deepEqual((await checkHooks(environment, ["opencode"])).map((check) => check.status), ["missing"]);
+  });
+});
+
+test("every OpenCode on PATH is asked, so a 1.x hidden behind a 2.x still counts", async () => {
+  await withHome(async ({ home }) => {
+    const bin = async (dir, name, output) => {
+      await mkdir(join(home, dir), { recursive: true });
+      await writeFile(join(home, dir, name), `#!/bin/sh\necho '${output}'\n`);
+      await chmod(join(home, dir, name), 0o755);
+    };
+    await bin("npm", "opencode", "opencode v2.0.24");
+    await bin("npm", "opencode2", "opencode v2.0.24");
+    await bin("pacman", "opencode", "1.18.29");
+    // A shim of a tool that is not OpenCode, printing its own version.
+    await bin("shims", "opencode", "2026.10.1 linux-x64");
+    const PATH = ["npm", "shims", "pacman"].map((dir) => join(home, dir)).join(":");
+    assert.deepEqual(await detectOpenCodeMajors({ PATH }), [1, 2]);
+    assert.deepEqual(await detectOpenCodeMajors({ PATH: join(home, "shims") }), []);
+    assert.deepEqual(await detectOpenCodeMajors({}), []);
   });
 });
 

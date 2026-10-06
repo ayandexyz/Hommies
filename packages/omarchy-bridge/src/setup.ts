@@ -10,9 +10,9 @@
  */
 import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { copyFile, lstat, mkdir, readFile, readlink, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
+import { access, constants, copyFile, lstat, mkdir, readFile, readlink, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { basename, delimiter, dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 export type SetupProvider = "claude" | "codex" | "opencode" | "gemini" | "antigravity" | "grok";
@@ -304,21 +304,36 @@ export function mergeOpenCodeConfig(config: JsonObject, entries: OpenCodeEntries
   return changed ? next : config;
 }
 
-/** The major version a binary's `--version` prints, or `null` when it is not on PATH. */
+/** The major version a binary's `--version` prints, or `null` when it does not run. */
 function versionMajor(binary: string, env: Readonly<Record<string, string | undefined>>): Promise<number | null> {
   return new Promise((resolve) => {
     execFile(binary, ["--version"], { env: { ...env }, timeout: 10_000 }, (error, stdout) => {
-      const match = error === null ? /(\d+)\.\d+\.\d+/.exec(stdout) : null;
+      // `1.18.31` (V1) or `opencode v2.0.24` (V2); anything else is not OpenCode.
+      const match = error === null ? /^\s*(?:opencode\s+)?v?(\d+)\.\d+\.\d+\s*$/.exec(stdout) : null;
       resolve(match === null ? null : Number(match[1]));
     });
   });
 }
 
-/** OpenCode majors on `env.PATH`, from `opencode` and V2's `opencode2` alias. */
+/**
+ * OpenCode majors installed on `env.PATH`. Every `opencode` and `opencode2`
+ * (V2's alias) is asked, not only the first: installing V2 from npm can put
+ * its `opencode` ahead of a V1 that is still installed and still used.
+ */
 export async function detectOpenCodeMajors(env: Readonly<Record<string, string | undefined>>): Promise<number[]> {
   if (!env.PATH) return [];
-  const majors = await Promise.all(["opencode", "opencode2"].map((binary) => versionMajor(binary, env)));
-  return majors.filter((major): major is number => major !== null);
+  // Each candidate runs by its own path: a version-manager shim resolves to the
+  // manager's binary, which picks the tool from the name it was called by.
+  const binaries = new Set<string>();
+  for (const directory of new Set(env.PATH.split(delimiter))) {
+    if (directory === "") continue;
+    for (const name of ["opencode", "opencode2"]) {
+      const candidate = join(directory, name);
+      if (await access(candidate, constants.X_OK).then(() => true, () => false)) binaries.add(candidate);
+    }
+  }
+  const majors = await Promise.all([...binaries].map((binary) => versionMajor(binary, env)));
+  return [...new Set(majors.filter((major): major is number => major !== null))].sort();
 }
 
 export interface SetupEnvironment {

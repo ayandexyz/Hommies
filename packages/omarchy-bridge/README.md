@@ -511,9 +511,10 @@ builds, one per OpenCode plugin API:
 - **OpenCode 2.x**: `dist/opencode-v2/`, a V2 plugin directory
   (`export default { id, setup }`). V2 does not run V1 plugins.
 
-`hommies setup` asks `opencode --version` and `opencode2 --version` (the V2
-package installs both names) and registers the matching build, removing the
-other. With 1.x and 2.x both installed it registers both: 1.x ignores
+`hommies setup` asks every `opencode` and `opencode2` on your PATH for its
+version (the V2 package installs both names, and installing it from npm can put
+its `opencode` ahead of a 1.x you still use) and registers the matching build,
+removing the other. With 1.x and 2.x both installed it registers both: 1.x ignores
 `plugins`, and 2.x skips the 1.x file entry with a warning. Re-run setup after
 upgrading OpenCode across a major version; until then OpenCode 2.x does not
 load Hommies. Both builds give OpenCode the same features as Claude Code:
