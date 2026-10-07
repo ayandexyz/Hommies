@@ -77,6 +77,23 @@ test("OpenCode V2 gets a plugin directory under plugins, replacing our V1 file e
   assert.deepEqual(mergeOpenCodeConfig(v2, {}), {});
 });
 
+test("setup also registers the V2 plugin in OpenCode 2.5's own config directory", async () => {
+  await withHome(async ({ home, environment }) => {
+    await mkdir(join(home, ".config", "opencode2"), { recursive: true });
+    const file = join(home, ".config", "opencode2", "opencode.json");
+    await writeFile(file, JSON.stringify({ plugins: ["superpowers"] }));
+    const only = { ...install, providers: ["opencode"] };
+
+    // No `~/.config/opencode`: one result for it, none hidden for the V2-only dir.
+    assert.deepEqual((await runSetup(only, environment)).map((result) => result.status), ["skipped", "updated"]);
+    assert.deepEqual(await readJson(file), { plugins: ["superpowers", "file:///opt/hommies/dist/opencode-v2"] });
+    assert.deepEqual((await checkHooks(environment, ["opencode"])).map((check) => check.status), ["not-installed", "current"]);
+
+    await runSetup({ ...only, uninstall: true }, environment);
+    assert.deepEqual(await readJson(file), { plugins: ["superpowers"] });
+  });
+});
+
 test("setup registers the OpenCode V2 plugin when OpenCode 2 is installed, and checks it without asking OpenCode", async () => {
   await withHome(async ({ home, environment }) => {
     await mkdir(join(home, ".config", "opencode"), { recursive: true });

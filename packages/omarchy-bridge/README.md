@@ -554,7 +554,8 @@ plugins you already have. OpenCode 1.x loads a file from `plugin`:
 ```
 
 OpenCode 2.x loads a directory from `plugins` (it rejects a file path, even
-under `plugin`):
+under `plugin`). OpenCode 2.5 and later read `~/.config/opencode2/opencode.json`
+instead; setup registers it there too when that directory exists:
 
 ```json
 {

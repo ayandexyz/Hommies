@@ -372,6 +372,8 @@ interface ProviderTarget {
   readonly fingerprint: (config: JsonObject) => string[];
   /** Config variants setup cannot edit safely; when one exists the provider is skipped. */
   readonly unsupported?: string;
+  /** A second config location for a provider: left out silently when its directory is absent. */
+  readonly optional?: boolean;
 }
 
 function targets(environment: SetupEnvironment): ReadonlyArray<ProviderTarget> {
@@ -380,6 +382,8 @@ function targets(environment: SetupEnvironment): ReadonlyArray<ProviderTarget> {
   const claudeDir = env.CLAUDE_CONFIG_DIR || join(home, ".claude");
   const codexDir = env.CODEX_HOME || join(home, ".codex");
   const openCodeDir = join(env.XDG_CONFIG_HOME || join(home, ".config"), "opencode");
+  // OpenCode 2.5+ moved to its own directory, which only V2 reads.
+  const openCode2Dir = join(env.XDG_CONFIG_HOME || join(home, ".config"), "opencode2");
   const geminiDir = join(home, ".gemini");
   const antigravityDir = join(geminiDir, "config");
   const grokDir = join(home, ".grok");
@@ -407,6 +411,15 @@ function targets(environment: SetupEnvironment): ReadonlyArray<ProviderTarget> {
         ...(openCode === "v2" ? {} : { plugin: pathToFileURL(join(distDir, "opencode-plugin.js")).href }),
         ...(openCode === "v1" ? {} : { plugins: pathToFileURL(join(distDir, "opencode-v2")).href }),
       }),
+      fingerprint: openCodeFingerprint,
+    },
+    {
+      provider: "opencode",
+      configDir: openCode2Dir,
+      file: join(openCode2Dir, "opencode.json"),
+      unsupported: join(openCode2Dir, "opencode.jsonc"),
+      optional: true,
+      merge: (config, install) => mergeOpenCodeConfig(config, install ? { plugins: pathToFileURL(join(distDir, "opencode-v2")).href } : {}),
       fingerprint: openCodeFingerprint,
     },
     {
@@ -484,6 +497,7 @@ export async function runSetup(options: SetupOptions, environment: SetupEnvironm
     if (!options.providers.includes(target.provider)) continue;
     const { provider, file } = target;
     if (!(await exists(target.configDir))) {
+      if (target.optional === true) continue;
       results.push({ provider, file: target.configDir, status: "skipped", message: "not installed" });
       continue;
     }
@@ -586,6 +600,7 @@ export async function checkHooks(
     if (!providers.includes(target.provider)) continue;
     const { provider, file } = target;
     if (!(await exists(target.configDir))) {
+      if (target.optional === true) continue;
       checks.push({ provider, status: "not-installed", file: target.configDir });
       continue;
     }

@@ -12,7 +12,7 @@
  * - Events are `{ type, data }` from `ctx.event.subscribe`, not `{ type, properties }`.
  * - The `question` tool asks through a form (`form.created`, fields `q0..qN`)
  *   instead of `question.asked`. Plugins have no form API, so form answers go
- *   to the local OpenCode service's HTTP API (`$XDG_STATE_HOME/opencode/service.json`).
+ *   to the local OpenCode service's HTTP API (`$XDG_STATE_HOME/opencode2/service.json`, or `opencode/` before 2.5).
  * - A turn ends with exactly one of `session.execution.succeeded`, `.failed`, or
  *   `.interrupted`. OpenCode 2.0.24 never emits `session.idle`, and nothing
  *   follows those three, so each is final (`session.error` is gone too).
@@ -394,15 +394,19 @@ async function replyToForm(sessionId: string, formId: string, answer: Record<str
 /** The local OpenCode service, or `null` when it is unregistered or not on loopback. */
 async function serviceEndpoint(): Promise<ServiceEndpoint | null> {
   const stateHome = process.env.XDG_STATE_HOME || join(homedir(), ".local", "state");
-  try {
-    const info: unknown = JSON.parse(await readFile(join(stateHome, "opencode", "service.json"), "utf8"));
-    if (!isRecord(info) || typeof info.url !== "string") return null;
-    // The service password never leaves the machine.
-    if (!loopbackHosts.has(new URL(info.url).hostname)) return null;
-    return { url: info.url, ...(typeof info.password === "string" ? { password: info.password } : {}) };
-  } catch {
-    return null;
+  // OpenCode 2.5+ keeps its state under `opencode2`; earlier 2.x under `opencode`.
+  for (const dir of ["opencode2", "opencode"]) {
+    try {
+      const info: unknown = JSON.parse(await readFile(join(stateHome, dir, "service.json"), "utf8"));
+      if (!isRecord(info) || typeof info.url !== "string") return null;
+      // The service password never leaves the machine.
+      if (!loopbackHosts.has(new URL(info.url).hostname)) return null;
+      return { url: info.url, ...(typeof info.password === "string" ? { password: info.password } : {}) };
+    } catch {
+      // Not registered here; try the older location.
+    }
   }
+  return null;
 }
 
 /** Maps an OpenCode V2 structured session error to the bridge's (Claude's) failure names. */
