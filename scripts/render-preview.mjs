@@ -116,7 +116,7 @@ const cards = outfitSheet ? outfitCards : moodCards;
 const heading = outfitSheet ? "Hommie's wardrobe" : "Hommie";
 const subheading = outfitSheet
   ? "right-click him to pick an outfit, or leave it on Auto for the seasons"
-  : "watches Claude Code, Codex, OpenCode, Omacode, Gemini CLI, Antigravity and Grok from your Omarchy desktop";
+  : "watches Claude Code, Codex, OpenCode, Gemini CLI, Antigravity and Grok from your Omarchy desktop";
 
 const html = `<!doctype html>
 <html><head><meta charset="utf-8"><style>

@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-Hommies is an Omarchy top-bar plugin (a bell) that shows pending **permission requests**, **questions**, and **turn ends** from coding agents (Claude Code, Codex, OpenCode, Omacode, and activity-only Gemini CLI, Antigravity, Grok Build) and lets you answer some of them from the bar. `AGENTS.md` has the project rules. Its "What is NOT done yet" section is out of date: the server, the HTTP routes, and the QML client are all implemented now.
+Hommies is an Omarchy top-bar plugin (a bell) that shows pending **permission requests**, **questions**, and **turn ends** from coding agents (Claude Code, Codex, OpenCode, and activity-only Gemini CLI, Antigravity, Grok Build) and lets you answer some of them from the bar. `AGENTS.md` has the project rules. Its "What is NOT done yet" section is out of date: the server, the HTTP routes, and the QML client are all implemented now.
 
 ## Commands
 
@@ -39,12 +39,11 @@ There are three processes, and they only talk to each other over loopback HTTP:
 1. **Agent-side adapters** run inside or next to each agent and POST to the bridge:
    - `claude-hook.ts` and `codex-hook.ts` are command-hook binaries. They read the hook JSON from stdin, read `port.json`, and POST to `/v1/providers/{claude,codex}/...`. `PermissionRequest` and the Claude `AskUserQuestion` PreToolUse hook block until the bar answers (timeout about 305s). Turn hooks (`Stop`, `UserPromptSubmit`, `SessionEnd`) never block and never write to stdout. Shared code lives in `hook-common.ts`.
    - `opencode-plugin.ts` is an OpenCode server plugin that runs inside OpenCode and uses the `/v1/providers/opencode/{permission,question}[/resolved]` request-id protocol. `opencode-v2/server.ts` is the same plugin for OpenCode 2.x's plugin API (directory entry under `plugins`, `export default { id, setup }`, question tool → forms answered over the OpenCode service's HTTP API). Shared helpers live in `opencode-common.ts`; `setup.ts` picks the flavor by asking every `opencode` / `opencode2` on PATH for its version (both majors found → both entries).
-   - Omacode (FreeCode) has its own built-in integration upstream (`apps/core/src/hooks/builtin/agent-fold.ts` in the freecode repo) that uses the same protocol under `/v1/providers/omacode/*`.
    - **Fail-open rule:** if the bridge is not running, every adapter exits without a decision, so the agent falls back to its own native prompt. Keep this behavior.
 2. **The bridge daemon** (`packages/omarchy-bridge`): `runtime.ts` is the `hommies-bridge` CLI, which calls `startBridgeServer` in `server.ts`. `server.ts` does almost all of the work. All state is kept in memory (pending permissions, questions, and attention/finished items, with a 12h attention timeout) and is lost when the process exits. The server binds to `127.0.0.1` and writes `{port, token, version}` to `$HOMMIES_DATA_DIR` or `$XDG_DATA_HOME/hommies/port.json`. Every request must carry the `x-hommies-token` header. `stop-detection.ts` classifies the final assistant message (read from the hook payload or from the transcript via `transcript.ts` / `codex-transcript.ts`) as an `attention` item (a plain-text question) or a `finished` item. `notifier.ts` shells out to `notify-send`.
 3. **The QML plugin** (`packages/bell-plugin`) runs inside the Omarchy Quickshell process. `Service.qml` spawns `hommies-bridge` and restarts it when it exits. `BarWidget.qml` reads `port.json`, polls `/v1/pending` every 3s through `bridge.js` (XHR; `subscribe`/SSE is still a stub), and loads `Panel.qml` through a `Loader`. `Panel.qml` renders items grouped by provider and posts to `/v1/respond` and `/v1/preferences`.
 
-Item kinds are `permission | question | attention | finished`. The answer-surface preference is `topbar | cli`, shown in the UI as "Top bar" / "Claude CLI". In `cli` mode, questions are mirrored read-only in the bar and the agent's own prompt owns the answer. For OpenCode and Omacode, both the bar and the agent's TUI can answer, and whichever answers first wins.
+Item kinds are `permission | question | attention | finished`. The answer-surface preference is `topbar | cli`, shown in the UI as "Top bar" / "Claude CLI". In `cli` mode, questions are mirrored read-only in the bar and the agent's own prompt owns the answer. For OpenCode, both the bar and the agent's TUI can answer, and whichever answers first wins.
 
 Public types live in `types.ts`. `localContracts.ts` holds the shared branded ID types and provider kinds.
 

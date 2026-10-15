@@ -48,7 +48,7 @@ function parseArgs(argv: ReadonlyArray<string>): RuntimeOptions {
 }
 
 /**
- * Bridges before 0.2.2 also wrote `agent-fold/port.json`, which older Omacode
+ * Bridges before 0.2.2 also wrote `agent-fold/port.json`, which older client
  * builds trust without checking who holds the port. A crash could leave it
  * pointing at a freed port, so it is removed and never written again.
  */

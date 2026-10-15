@@ -23,8 +23,7 @@ What changed from the plan below: `PostToolUse` (other than for
 AskUserQuestion) is not hooked, to save a hook process per tool call.
 `SubagentStart` and `SubagentStop` were added later: they fire once per
 subagent, so they cost little, and they show as `Subagent Explore` /
-`Subagent Explore finished`. Omacode does not report activity yet; its route
-is ready.
+`Subagent Explore finished`.
 
 **Goal:** show each session's state (idle, thinking, working) and a short feed
 of its latest steps, such as `Edit server.ts` or `Bash pnpm test`, not only the
@@ -32,7 +31,7 @@ items that need an answer.
 
 **Events to hook (Claude):** `SessionStart`, `UserPromptSubmit`, `PreToolUse`,
 `PostToolUse`, `PostToolUseFailure`, `SubagentStart`, `SubagentStop`,
-`SessionEnd`. Codex, OpenCode and Omacode report the same transitions through
+`SessionEnd`. Codex and OpenCode report the same transitions through
 their own adapters.
 
 **State per session:**
@@ -143,7 +142,7 @@ stops the same rule from asking again.
   first, and use the suggestions Claude includes in the hook input rather
   than inventing rules.
 - **Codex:** use its allow-for-this-session option.
-- **OpenCode / Omacode:** map to their "always" reply if the protocol has one;
+- **OpenCode:** map to its "always" reply if the protocol has one;
   otherwise hide the button for that provider.
 - `POST /v1/respond`: add a new `decision` value (for example
   `acceptAlways`). Adapters that don't support it treat it as `accept`.
@@ -163,7 +162,7 @@ a dedicated adapter.
 - `hommies-hook --agent <name>` (or a new `agent` field in the payload)
   tags events with an agent name.
 - Validate the name against `^[a-z0-9-]{1,24}$`. Reserve the built-in
-  provider names (`claude`, `codex`, `opencode`, `omacode`) so a custom agent
+  provider names (`claude`, `codex`, `opencode`) so a custom agent
   can't impersonate them.
 - Events with an invalid name are rejected and are never routed to a built-in
   provider.

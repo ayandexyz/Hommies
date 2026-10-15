@@ -5,12 +5,11 @@
 pnpm workspace monorepo with two packages.
 
 - `packages/omarchy-bridge/` — `@thisisayande/hommies` (npm). TypeScript + Effect.
-  A localhost HTTP daemon (`startBridgeServer` in `src/server.ts`) plus four
+  A localhost HTTP daemon (`startBridgeServer` in `src/server.ts`) plus three
   provider adapters that feed it:
   - Claude Code: blocking command hooks (`src/claude-hook.ts`, bin `hommies-claude-hook`).
   - Codex: blocking command hooks (`src/codex-hook.ts`, bin `hommies-codex-hook`).
   - OpenCode: in-process plugin (`src/opencode-plugin.ts`, export `AgentFoldOpenCode`).
-  - Omacode: built-in to the agent itself; Omacode talks to the same endpoints as OpenCode.
   Shared branded ID types and provider kinds live in `src/localContracts.ts`.
 - `packages/bell-plugin/` — Omarchy plugin distributed as a folder consumed by
   `omarchy plugin add`. QML (`BarWidget.qml` entry, `Panel.qml` loaded via
@@ -100,8 +99,8 @@ plugin's contract with installed copies; preserve it.
 - `POST /v1/preferences` — `BridgePreferencesInput`.
 - Provider hooks (POST): `/v1/providers/claude/{permission,question,question/resolved}`,
   `/v1/providers/codex/permission`,
-  `/v1/providers/{opencode,omacode}/{permission,question,permission/resolved,question/resolved}`,
-  `/v1/providers/{claude,codex,opencode,omacode}/{stop,resume}`.
+  `/v1/providers/opencode/{permission,question,permission/resolved,question/resolved}`,
+  `/v1/providers/{claude,codex,opencode}/{stop,resume}`.
 - `kind` values on `PendingItem`: `question | permission | attention | finished`.
   v2 will add `plan | session-error | signed-out` (see the `// TODO` in
   `src/types.ts`).
@@ -126,7 +125,7 @@ hang on a request nobody owns — see `onHookDisconnect` in `server.ts`.
 - Provider-specific provider ids and labels live in `providerLabels` and
   `hasRequestIds` (`src/server.ts`); add a new provider there, in
   `localContracts.ts`'s `ProviderDriverKind`, and in the manifest schema
-  options. OpenCode and Omacode use their own request ids
+  options. OpenCode uses its own request ids
   (`per_...` / `que_...`) so a TUI answer can clear the bar item — see
   `RequestIdProvider` and `resolveRequestId{Question,Permission}`.
 - Notification text is HTML-escaped (`notifier.ts#escapeMarkup`) before
@@ -143,8 +142,8 @@ exercise the HTTP surface end-to-end:
 - `question-surfaces.test.mjs` — topbar vs cli answer surfaces.
 - `notifications.test.mjs` — desktop notification dispatch.
 - `stop-detection.test.mjs` — `detectReplyRequest` heuristic.
-- `codex.test.mjs`, `opencode.test.mjs`, `omacode.test.mjs` — provider
-  adapters (the OpenCode/Omacode tests drive the plugin's helpers; they
+- `codex.test.mjs`, `opencode.test.mjs` — provider
+  adapters (the OpenCode tests drive the plugin's helpers; they
   do not spawn OpenCode).
 
 ## What is NOT done yet

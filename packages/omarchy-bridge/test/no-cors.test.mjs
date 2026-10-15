@@ -6,7 +6,7 @@ import test from "node:test";
 
 import { startBridgeServer } from "../dist/server.js";
 
-// Every client (the QML plugin, the hooks, the OpenCode plugin, Omacode) runs
+// Every client (the QML plugin, the hooks, the OpenCode plugin) runs
 // outside a browser, so the bridge sends no CORS headers: a web page must not
 // be allowed to read its responses or preflight a request to it.
 

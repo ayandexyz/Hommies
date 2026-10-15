@@ -1,7 +1,7 @@
 # Hommies
 
 A Omarchy bar plugin that surfaces pending **questions** and **permission requests** from
-coding agents (Claude Code, Codex, OpenCode, Omacode, Gemini CLI, Antigravity, Grok Build, or any agent with command hooks) so you don't miss
+coding agents (Claude Code, Codex, OpenCode, Gemini CLI, Antigravity, Grok Build, or any agent with command hooks) so you don't miss
 them when you're away from the chat UI.
 
 ## Why
@@ -21,7 +21,7 @@ top-bar bell is still available.
   right-click for settings, drag to move it. It shows over fullscreen windows unless you
   turn **Over fullscreen** off.
 - **Answer from the bar**: permission requests and questions from Claude Code, Codex,
-  OpenCode, and Omacode, grouped by agent and session. **Always** saves the rule for
+  and OpenCode, grouped by agent and session. **Always** saves the rule for
   Claude Code and OpenCode, so the same request does not ask again.
 - **Turn ends**: a session that stopped with a question in plain text shows as waiting
   for your reply; one that simply finished shows as done.
@@ -59,14 +59,12 @@ Working end to end, not yet published to the plugin marketplace.
   `/v1/pending` every 3 seconds. Hommie's card (and the bar bell's panel) answers
   permissions and questions and shows live activity, failures, and the jump-to-terminal
   button.
-- **Omacode** ships its own integration upstream.
 
 Not done yet:
 
 - `GET /v1/stream` (SSE) exists in the bridge, but the plugin still polls.
 - Codex has no failure hook and rejects saved permission rules, so its failed turns
   are not reported and it gets no **Always** button.
-- Omacode does not report live activity yet.
 - Custom agents' permission requests are not answered from the bar.
 - The bridge keeps everything in memory, so pending items are lost when it restarts.
 

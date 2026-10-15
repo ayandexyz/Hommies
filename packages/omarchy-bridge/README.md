@@ -78,8 +78,8 @@ also count as out of date.
 
 The same check lists every agent that has Hommies hooks, current or out of
 date, in `hooksConnected`. The panel shows a tab only for those agents and for
-any agent that has reported a session or item (Omacode, which needs no setup,
-and custom agents). Until one qualifies, it shows all four built-in tabs.
+any agent that has reported a session or item (custom agents included). Until
+one qualifies, it shows all three built-in tabs.
 
 Setup also writes `~/.local/bin/hommies-bridge`, a two-line launcher that runs
 the bridge with the Node that ran setup. The Omarchy plugin starts the bridge
@@ -297,7 +297,7 @@ edit is counted roughly instead, so a hook never slows the agent down.
 The field is optional, so older plugin copies ignore it. `stepEdits` is
 index-aligned with `steps` (`null` for steps that are not edits) and is absent
 when no listed step is an edit. Adapters post to
-`/v1/providers/{claude,codex,opencode,omacode}/activity`:
+`/v1/providers/{claude,codex,opencode}/activity`:
 
 ```json
 { "hook_event_name": "PreToolUse", "session_id": "...", "cwd": "/w/app", "tool_name": "Bash", "tool_input": { "command": "pnpm build" } }
@@ -374,7 +374,7 @@ Claude-style hook JSON on stdin and reports to `/v1/agents/<name>/...`:
 
 - The name comes from `--agent`, then `$HOMMIES_AGENT`, then an `agent`
   field in the payload. It must be 1-24 lowercase letters, digits, or hyphens,
-  and not `claude`, `codex`, `opencode`, `omacode`, `cursor`, `grok`,
+  and not `claude`, `codex`, `opencode`, `cursor`, `grok`,
   `antigravity`, or `gemini`, so a custom agent cannot pose as a built-in one.
   (`gemini` became reserved when Gemini CLI got its own hook; a custom agent
   named `gemini` should switch to `hommies setup --only gemini`.) Invalid
@@ -407,8 +407,8 @@ rule; the item then has `"canAcceptAlways": true`, and the panel sends
   "don't ask again" option would save (Claude picks where they are stored).
   The bar never invents rules.
 - **OpenCode**: the plugin replies `always` instead of `once`.
-- **Codex** rejects `updatedPermissions` in its hook output, and **Omacode**
-  only offers wider grants in its own prompt, so neither gets the button.
+- **Codex** rejects `updatedPermissions` in its hook output, so it never gets
+  the button.
 
 `acceptAlways` on an item without `canAcceptAlways` is treated as `accept`.
 
@@ -573,35 +573,6 @@ the V2 plugin sends no process ancestry and the bar cannot focus that
 terminal. Both reach the bridge only through `port.json` on loopback. If the
 bridge is not running, the plugin does nothing, and OpenCode behaves as it
 would without it.
-
-## Omacode integration
-
-Omacode (FreeCode) ships the integration itself, as a built-in of
-`freecode serve` (`apps/core/src/hooks/builtin/agent-fold.ts`); there is
-nothing to register. It posts to `/v1/providers/omacode/*` with the same
-request-id protocol as the OpenCode plugin:
-
-- **Permissions**: Accept answers `allow-once`, Decline answers `deny`, Cancel
-  leaves the prompt to Omacode. Wider grants are only offered in Omacode's own
-  prompt, where the rule they persist is visible.
-- **Questions** from Omacode's `question` tool, including multi-select and
-  typed answers.
-- **Turn ends**: plain-text questions become `attention` items and anything
-  else becomes `finished`. Items clear when the next turn starts or you
-  interrupt the turn; a turn that failed is not reported.
-- **Session names** from Omacode's session title, grouped by project folder.
-
-Omacode does not report [live activity](#live-activity) yet; the
-`/v1/providers/omacode/activity` route is ready for it.
-
-Omacode keeps showing its own prompt, and whichever surface answers first wins.
-It reads `$XDG_DATA_HOME/hommies/port.json` on every report, so it follows a
-restarted bridge, and does nothing when the bridge is not running. Like the
-hooks, it only sends once the port is held by your own user and only trusts
-replies signed with the bridge's `serverKey` (see `bridge-identity.ts`).
-This needs Omacode from `main` at `d6ded5c` or later; older builds read `agent-fold/port.json`,
-which the bridge no longer writes, so they fall back to Omacode's own prompt. `FREECODE_AGENT_FOLD=0` turns it off.
-A headless `freecode run` never reports.
 
 ## Gemini CLI, Antigravity, and Grok Build
 

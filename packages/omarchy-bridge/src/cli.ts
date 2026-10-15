@@ -42,7 +42,6 @@ function report(results: ReadonlyArray<SetupResult>, uninstall: boolean): void {
   if (updated.has("gemini")) process.stdout.write("Gemini CLI: restart it, and approve the new hooks if it asks.\n");
   if (updated.has("antigravity")) process.stdout.write("Antigravity: restart agy to load the hooks.\n");
   if (updated.has("grok")) process.stdout.write("Grok Build: restart grok to load the hooks.\n");
-  if (updated.size > 0) process.stdout.write("Omacode needs no setup; its integration is built in.\n");
 }
 
 const checkLines: Record<HookCheck["status"], string> = {

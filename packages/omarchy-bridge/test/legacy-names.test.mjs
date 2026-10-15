@@ -8,9 +8,9 @@ import { readConnection } from "../dist/hook-common.js";
 import { startBridgeServer } from "../dist/server.js";
 import { runSetup } from "../dist/setup.js";
 
-// Hommies was called agent-fold. Readers from before the rename (Omacode's
-// built-in integration, older plugin copies, custom-agent hooks) still use the
-// old folder, header, and variable names, so the bridge keeps accepting them.
+// Hommies was called agent-fold. Readers from before the rename (older plugin
+// copies, custom-agent hooks) still use the old folder, header, and variable
+// names, so the bridge keeps accepting them.
 
 test("the bridge accepts the token under the old header name", async () => {
   await withServer({}, async ({ url, token }) => {

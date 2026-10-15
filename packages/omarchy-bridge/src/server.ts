@@ -95,17 +95,17 @@ interface PendingQuestion {
   readonly timer: ReturnType<typeof setTimeout>;
 }
 
-type BuiltInProvider = "claude" | "codex" | "opencode" | "omacode" | ActivityOnlyProvider;
+type BuiltInProvider = "claude" | "codex" | "opencode" | ActivityOnlyProvider;
 /**
  * Agents whose hooks report live activity, turn ends, and failures only:
  * they have no hook that can answer a permission or question.
  */
 type ActivityOnlyProvider = "gemini" | "antigravity" | "grok";
-const builtInProviders: ReadonlyArray<BuiltInProvider> = ["claude", "codex", "opencode", "omacode", "gemini", "antigravity", "grok"];
+const builtInProviders: ReadonlyArray<BuiltInProvider> = ["claude", "codex", "opencode", "gemini", "antigravity", "grok"];
 
 declare const customAgentBrand: unique symbol;
 /** A validated custom agent name; only `customAgentName` creates one. */
-type NamedDriverKind = "claude" | "codex" | "opencode" | "omacode" | "cursor" | "grok" | "antigravity" | "gemini";
+type NamedDriverKind = "claude" | "codex" | "opencode" | "cursor" | "grok" | "antigravity" | "gemini";
 type CustomAgent = Exclude<ProviderDriverKind, NamedDriverKind> & { readonly [customAgentBrand]: true };
 type Provider = BuiltInProvider | CustomAgent;
 
@@ -119,14 +119,14 @@ function isBuiltIn(provider: string): provider is BuiltInProvider {
 }
 
 /**
- * Agents whose integration runs in-process (OpenCode's plugin, Omacode's
- * built-in) rather than as a blocking command hook. They send their own
- * request ids so an answer given in the agent's TUI can clear the bar, and
- * they take question answers as one label array per question.
+ * Agents whose integration runs in-process (OpenCode's plugin) rather than as
+ * a blocking command hook. They send their own request ids so an answer
+ * given in the agent's TUI can clear the bar, and they take question answers
+ * as one label array per question.
  */
-type RequestIdProvider = "opencode" | "omacode";
+type RequestIdProvider = "opencode";
 function hasRequestIds(provider: Provider): provider is RequestIdProvider {
-  return provider === "opencode" || provider === "omacode";
+  return provider === "opencode";
 }
 
 /** `agent` names notifications and panel hints; `thread` prefixes `PendingResponse` thread titles. */
@@ -134,7 +134,6 @@ const providerLabels: Record<BuiltInProvider, { readonly agent: string; readonly
   claude: { agent: "Claude", thread: "Claude Code" },
   codex: { agent: "Codex", thread: "Codex" },
   opencode: { agent: "OpenCode", thread: "OpenCode" },
-  omacode: { agent: "Omacode", thread: "Omacode" },
   gemini: { agent: "Gemini", thread: "Gemini CLI" },
   antigravity: { agent: "Antigravity", thread: "Antigravity" },
   grok: { agent: "Grok", thread: "Grok Build" },
@@ -312,11 +311,11 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     if (request.method === "POST" && url.pathname === "/v1/providers/codex/permission") {
       return await receivePermission(response, await readJson<ClaudePermissionHookInput>(request), "codex", state);
     }
-    const inProcess = /^\/v1\/providers\/(opencode|omacode)\/(permission|question)(\/resolved)?$/.exec(url.pathname);
+    const inProcess = /^\/v1\/providers\/opencode\/(permission|question)(\/resolved)?$/.exec(url.pathname);
     if (request.method === "POST" && inProcess) {
-      const provider = inProcess[1] as RequestIdProvider;
-      const resolved = inProcess[3] !== undefined;
-      if (inProcess[2] === "permission") {
+      const provider: RequestIdProvider = "opencode";
+      const resolved = inProcess[2] !== undefined;
+      if (inProcess[1] === "permission") {
         return resolved
           ? resolveRequestIdPermission(response, await readJson<OpenCodeResolvedInput>(request), provider, state)
           : await receivePermission(response, await readJson<ClaudePermissionHookInput>(request), provider, state);
@@ -338,7 +337,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     if (request.method === "POST" && url.pathname === "/v1/providers/claude/question/resolved") {
       return resolveClaudeQuestion(response, await readJson<ClaudeQuestionHookInput>(request), state);
     }
-    const turn = /^\/v1\/providers\/(claude|codex|opencode|omacode|gemini|antigravity|grok)\/(stop|resume)$/.exec(url.pathname);
+    const turn = /^\/v1\/providers\/(claude|codex|opencode|gemini|antigravity|grok)\/(stop|resume)$/.exec(url.pathname);
     if (request.method === "POST" && turn) {
       const provider = turn[1] as Provider;
       const input = await readJson<ClaudeTurnHookInput>(request);
@@ -355,11 +354,11 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         default: return receiveResume(response, await readJson<ClaudeTurnHookInput>(request), name, state);
       }
     }
-    const failure = /^\/v1\/providers\/(claude|codex|opencode|omacode|gemini|antigravity|grok)\/failure$/.exec(url.pathname);
+    const failure = /^\/v1\/providers\/(claude|codex|opencode|gemini|antigravity|grok)\/failure$/.exec(url.pathname);
     if (request.method === "POST" && failure) {
       return receiveFailure(response, await readJson<FailureHookInput>(request), failure[1] as Provider, state);
     }
-    const activity = /^\/v1\/providers\/(claude|codex|opencode|omacode|gemini|antigravity|grok)\/activity$/.exec(url.pathname);
+    const activity = /^\/v1\/providers\/(claude|codex|opencode|gemini|antigravity|grok)\/activity$/.exec(url.pathname);
     if (request.method === "POST" && activity) {
       return receiveActivity(response, await readJson<ActivityHookInput>(request), activity[1] as Provider, state);
     }
@@ -634,8 +633,8 @@ function clearAttention(state: BridgeState, sessionId: string): boolean {
 }
 
 /**
- * Claude's AskUserQuestion (PreToolUse) and OpenCode's and Omacode's `question`
- * tools. Their questions arrive already converted to the AskUserQuestion shape.
+ * Claude's AskUserQuestion (PreToolUse) and OpenCode's `question` tool. Their
+ * questions arrive already converted to the AskUserQuestion shape.
  */
 async function receiveQuestion(
   response: ServerResponse,
@@ -785,7 +784,7 @@ function openCodeQuestionInput(input: OpenCodeQuestionInput): ClaudeQuestionHook
 }
 
 /**
- * OpenCode and Omacode want one array of labels per question, in order. The panel joins
+ * OpenCode wants one array of labels per question, in order. The panel joins
  * multi-select picks with ", ", so split them back when every piece is an
  * option label; anything else is a custom answer.
  */
@@ -944,7 +943,7 @@ function onHookDisconnect(response: ServerResponse, onDisconnect: () => void): v
   });
 }
 
-/** `x-agent-fold-token` is the header name from before the rename; Omacode still sends it. */
+/** `x-agent-fold-token` is the header name from before the rename; older clients still send it. */
 function authorised(request: IncomingMessage, state: BridgeState): boolean {
   return (request.headers["x-hommies-token"] ?? request.headers["x-agent-fold-token"]) === state.token;
 }
@@ -954,7 +953,7 @@ async function receivePermission(response: ServerResponse, input: ClaudePermissi
   // A new request means the agent is working again in this session.
   clearAttention(state, input.session_id);
   trackSession(state, provider, input.session_id, { process: input, cwd: input.cwd, sessionTitle: input.session_title });
-  // OpenCode and Omacode ids let their integrations clear the item when the TUI answers first.
+  // OpenCode ids let its integration clear the item when the TUI answers first.
   const id = ApprovalRequestId(hasRequestIds(provider) && typeof input.request_id === "string" && input.request_id.length > 0
     ? input.request_id
     : randomUUID());
@@ -996,8 +995,8 @@ async function receivePermission(response: ServerResponse, input: ClaudePermissi
 }
 
 /**
- * Codex rejects `updatedPermissions`, and Omacode only offers wider grants in
- * its own prompt, so only Claude (when it sent suggestions) and OpenCode can.
+ * Codex rejects `updatedPermissions`, so only Claude (when it sent
+ * suggestions) and OpenCode can accept with a wider grant.
  */
 function canAcceptAlways(provider: Provider, input: ClaudePermissionHookInput): boolean {
   if (provider === "opencode") return true;
