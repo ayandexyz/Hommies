@@ -270,7 +270,11 @@ Item {
   FileView {
     id: prefsFile
     path: root.dataDir + "/floating.json"
+    watchChanges: true
     printErrors: false
+    // BarWidget.qml writes `hideBuddy` into this same file so the bar's
+    // panel can restore Hommie after hiding leaves no menu to do it from.
+    onFileChanged: reload()
     onLoaded: {
       try {
         var parsed = JSON.parse(text())

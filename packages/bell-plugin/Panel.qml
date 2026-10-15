@@ -406,6 +406,15 @@ Panel {
     hostWidget.setQuestionAnswerSurface(root.questionsAnsweredInTopbar ? "cli" : "topbar")
   }
 
+  // Hiding the floating character from its own right-click menu leaves no
+  // menu to bring it back from, so this mirrors the toggle here too.
+  readonly property bool buddyHidden: hostWidget && typeof hostWidget.hideBuddy === "boolean" ? hostWidget.hideBuddy : false
+
+  function toggleBuddyHidden() {
+    if (!hostWidget || typeof hostWidget.setHideBuddy !== "function") return
+    hostWidget.setHideBuddy(!root.buddyHidden)
+  }
+
   function sessionActivity(provider) {
     var sessions = hostWidget && hostWidget.snapshot && hostWidget.snapshot.sessions ? hostWidget.snapshot.sessions : []
     var result = []
@@ -807,6 +816,26 @@ Panel {
               trackHeight: 22
               cursorPad: Style.space(2)
               onToggled: root.toggleSounds()
+            }
+
+            Text {
+              textFormat: Text.PlainText
+              anchors.verticalCenter: parent.verticalCenter
+              leftPadding: Style.space(8)
+              text: "Hommie"
+              color: root.barForeground
+              opacity: 0.72
+              font.family: root.bar ? root.bar.fontFamily : Style.font.family
+              font.pixelSize: Style.font.caption
+            }
+
+            ToggleSwitch {
+              anchors.verticalCenter: parent.verticalCenter
+              checked: !root.buddyHidden
+              foreground: root.barForeground
+              trackHeight: 22
+              cursorPad: Style.space(2)
+              onToggled: root.toggleBuddyHidden()
             }
           }
         }

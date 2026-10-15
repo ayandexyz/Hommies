@@ -29,6 +29,12 @@ BarWidget {
     ? "cli" : "topbar"
   readonly property bool desktopNotifications: setting("desktopNotifications", true) !== false
   readonly property bool sounds: setting("sounds", false) === true
+  // The floating character's own prefs (Service.qml owns the rest of this
+  // file); only `hideBuddy` needs to be readable/writable here too, since
+  // hiding it from its own right-click menu leaves no menu to unhide it.
+  readonly property string hommiesDataDir: (Quickshell.env("XDG_DATA_HOME") || Quickshell.env("HOME") + "/.local/share") + "/hommies"
+  property var floatingPrefs: ({})
+  readonly property bool hideBuddy: floatingPrefs.hideBuddy === true
   property var snapshot: ({ totalCount: 0, threads: [], sessions: [] })
   // The last snapshot as JSON. Polls that return the same data are dropped
   // so the panel's delegates (and their animations) are not rebuilt.
@@ -99,6 +105,13 @@ BarWidget {
   function setSounds(enabled) {
     updateSetting("sounds", enabled === true)
   }
+  function setHideBuddy(enabled) {
+    var next = {}
+    for (var key in root.floatingPrefs) next[key] = root.floatingPrefs[key]
+    next.hideBuddy = enabled === true
+    root.floatingPrefs = next
+    floatingPrefsFile.setText(JSON.stringify(next, null, 2) + "\n")
+  }
   function updateSetting(name, value) {
     var entry = { id: root.moduleName }
     for (var key in root.settings) if (key !== "id") entry[key] = root.settings[key]
@@ -126,7 +139,7 @@ BarWidget {
   StatusPalette { id: statusColors }
 
   FileView {
-    path: (Quickshell.env("XDG_DATA_HOME") || Quickshell.env("HOME") + "/.local/share") + "/hommies/port.json"
+    path: root.hommiesDataDir + "/port.json"
     watchChanges: true
     printErrors: false
     onFileChanged: reload()
@@ -138,6 +151,20 @@ BarWidget {
       } catch (error) {
         console.warn("hommies connection file invalid:", error)
       }
+    }
+  }
+
+  FileView {
+    id: floatingPrefsFile
+    path: root.hommiesDataDir + "/floating.json"
+    watchChanges: true
+    printErrors: false
+    onFileChanged: reload()
+    onLoaded: {
+      try {
+        var parsed = JSON.parse(text())
+        if (parsed && typeof parsed === "object") root.floatingPrefs = parsed
+      } catch (_) {}
     }
   }
 

@@ -27,12 +27,15 @@ here or in the agent CLI, desktop notifications, sounds, "Over fullscreen",
 and moving it to the next monitor. It shows above fullscreen windows by
 default; turn off "Over fullscreen" to keep it under them (for example, under
 a fullscreen video). Toggling "Hide Hommie" closes the character immediately
-(its own menu goes with it), so bind the `toggleHidden` IPC method (below) to
-a key if you want a way back in without editing `floating.json` by hand.
+(its own menu goes with it); bring it back from the bar bell's panel (a
+"Hommie" toggle sits next to Answer/Notify/Sound) or bind the `toggleHidden`
+IPC method (below) to a key.
 Its preferences (answer surface, notifications, sounds, over fullscreen, hidden,
-position, monitor, and `character`) are saved in `$XDG_DATA_HOME/hommies/floating.json`. The bar
-bell still works. If you keep both, they share the same bridge preferences, so
-remove the bell from the bar to avoid toggling them from two places.
+position, monitor, and `character`) are saved in `$XDG_DATA_HOME/hommies/floating.json`.
+`BarWidget.qml` also reads and writes `hideBuddy` in that same file so the bar
+panel's toggle works even with the character hidden. The bar bell still works
+on its own too. If you keep both, they share the same bridge preferences, so
+remove the bell from the bar to avoid toggling those from two places.
 
 ### Outfits
 
