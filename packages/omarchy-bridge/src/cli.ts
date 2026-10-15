@@ -42,6 +42,7 @@ function report(results: ReadonlyArray<SetupResult>, uninstall: boolean): void {
   if (updated.has("gemini")) process.stdout.write("Gemini CLI: restart it, and approve the new hooks if it asks.\n");
   if (updated.has("antigravity")) process.stdout.write("Antigravity: restart agy to load the hooks.\n");
   if (updated.has("grok")) process.stdout.write("Grok Build: restart grok to load the hooks.\n");
+  if (updated.has("freecode")) process.stdout.write("freecode: hooks apply automatically — no restart needed.\n");
 }
 
 const checkLines: Record<HookCheck["status"], string> = {
@@ -55,6 +56,7 @@ const checkLines: Record<HookCheck["status"], string> = {
 
 const providerLabels: Record<SetupProvider, string> = {
   claude: "Claude Code", codex: "Codex", opencode: "OpenCode", gemini: "Gemini CLI", antigravity: "Antigravity", grok: "Grok Build",
+  freecode: "freecode",
 };
 
 const pickHints: Record<HookCheck["status"], string> = {

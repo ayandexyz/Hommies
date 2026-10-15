@@ -1,7 +1,7 @@
 # Hommies
 
 A Omarchy bar plugin that surfaces pending **questions** and **permission requests** from
-coding agents (Claude Code, Codex, OpenCode, Gemini CLI, Antigravity, Grok Build, or any agent with command hooks) so you don't miss
+coding agents (Claude Code, Codex, OpenCode, freecode, Gemini CLI, Antigravity, Grok Build, or any agent with command hooks) so you don't miss
 them when you're away from the chat UI.
 
 ## Why
@@ -21,7 +21,7 @@ top-bar bell is still available.
   right-click for settings, drag to move it. It shows over fullscreen windows unless you
   turn **Over fullscreen** off.
 - **Answer from the bar**: permission requests and questions from Claude Code, Codex,
-  and OpenCode, grouped by agent and session. **Always** saves the rule for
+  OpenCode, and freecode, grouped by agent and session. **Always** saves the rule for
   Claude Code and OpenCode, so the same request does not ask again.
 - **Turn ends**: a session that stopped with a question in plain text shows as waiting
   for your reply; one that simply finished shows as done.
@@ -52,8 +52,8 @@ This is a pnpm workspace with two packages:
 
 Working end to end, not yet published to the plugin marketplace.
 
-- **Bridge** (`@thisisayande/hommies`): the HTTP API, the Claude Code and Codex
-  command hooks, the OpenCode plugin, the generic `hommies-hook`, desktop
+- **Bridge** (`@thisisayande/hommies`): the HTTP API, the Claude Code, Codex, and
+  freecode command hooks, the OpenCode plugin, the generic `hommies-hook`, desktop
   notifications, sounds, and `hommies setup` are implemented and tested.
 - **Plugin**: the service starts the bridge, restarts it when it exits, and polls
   `/v1/pending` every 3 seconds. Hommie's card (and the bar bell's panel) answers

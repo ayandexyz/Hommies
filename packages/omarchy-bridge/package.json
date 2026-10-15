@@ -18,6 +18,7 @@
     "claude-code",
     "codex",
     "opencode",
+    "freecode",
     "hooks",
     "agent"
   ],
@@ -33,6 +34,7 @@
     "hommies-gemini-hook": "./dist/gemini-hook.js",
     "hommies-antigravity-hook": "./dist/antigravity-hook.js",
     "hommies-grok-hook": "./dist/grok-hook.js",
+    "hommies-freecode-hook": "./dist/freecode-hook.js",
     "agent-fold": "./dist/cli.js",
     "agent-fold-bridge": "./dist/runtime.js",
     "agent-fold-claude-hook": "./dist/claude-hook.js",

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { checkHooks, detectOpenCodeMajors, isHommiesCommand, linkBridgeCommand, mergeClaudeSettings, mergeOpenCodeConfig, runSetup } from "../dist/setup.js";
+import { checkHooks, detectOpenCodeMajors, isHommiesCommand, linkBridgeCommand, mergeClaudeSettings, mergeFreecodeHooks, mergeOpenCodeConfig, runSetup } from "../dist/setup.js";
 
 const install = { uninstall: false, dryRun: false, providers: ["claude", "codex", "opencode"] };
 const uninstall = { ...install, uninstall: true };
@@ -50,6 +50,28 @@ test("Claude hooks merge beside the user's own hooks and replace stale entries",
   assert.equal(next.hooks.PermissionRequest[0].hooks[0].timeout, 305);
   assert.deepEqual(mergeClaudeSettings(next, "node /new/hommies/dist/claude-hook.js"), next, "setup is idempotent");
   assert.deepEqual(mergeClaudeSettings(next, null), { model: "opus", hooks: { Stop: [userStop] } });
+});
+
+test("freecode hooks merge beside the user's own hooks, every entry carrying an event-name arg", () => {
+  const settings = { memory: { autoRecall: true }, hooks: { Stop: [{ hooks: [{ type: "command", command: "say done" }] }] } };
+  const next = mergeFreecodeHooks(settings, "/opt/hommies/dist/freecode-hook.js");
+  assert.equal(next.memory.autoRecall, true, "the user's own settings are kept");
+  const freecodeStop = "test -f /opt/hommies/dist/freecode-hook.js && node /opt/hommies/dist/freecode-hook.js Stop || true";
+  assert.deepEqual(next.hooks.Stop, [
+    { hooks: [{ type: "command", command: "say done" }] },
+    { hooks: [{ type: "command", command: freecodeStop, timeout: 5 }] },
+  ]);
+  assert.deepEqual(next.hooks.PreToolUse, [{ matcher: "*", hooks: [
+    { type: "command", command: "test -f /opt/hommies/dist/freecode-hook.js && node /opt/hommies/dist/freecode-hook.js PreToolUse || true" },
+  ] }]);
+  assert.deepEqual(next.hooks.PostToolUse, [{ matcher: "question", hooks: [
+    { type: "command", command: "test -f /opt/hommies/dist/freecode-hook.js && node /opt/hommies/dist/freecode-hook.js PostToolUse || true" },
+  ] }]);
+  assert.equal(next.hooks.PermissionRequest[0].hooks[0].timeout, 305);
+  assert.ok(!("SessionEnd" in next.hooks), "freecode has no SessionEnd hook");
+  assert.ok(!("StopFailure" in next.hooks), "freecode has no StopFailure hook");
+  assert.deepEqual(mergeFreecodeHooks(next, "/opt/hommies/dist/freecode-hook.js"), next, "setup is idempotent");
+  assert.deepEqual(mergeFreecodeHooks(next, null), { memory: { autoRecall: true }, hooks: { Stop: [{ hooks: [{ type: "command", command: "say done" }] }] } });
 });
 
 test("uninstall leaves configs without our entries untouched", () => {

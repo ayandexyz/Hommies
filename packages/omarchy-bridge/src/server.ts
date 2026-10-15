@@ -95,17 +95,17 @@ interface PendingQuestion {
   readonly timer: ReturnType<typeof setTimeout>;
 }
 
-type BuiltInProvider = "claude" | "codex" | "opencode" | ActivityOnlyProvider;
+type BuiltInProvider = "claude" | "codex" | "opencode" | "freecode" | ActivityOnlyProvider;
 /**
  * Agents whose hooks report live activity, turn ends, and failures only:
  * they have no hook that can answer a permission or question.
  */
 type ActivityOnlyProvider = "gemini" | "antigravity" | "grok";
-const builtInProviders: ReadonlyArray<BuiltInProvider> = ["claude", "codex", "opencode", "gemini", "antigravity", "grok"];
+const builtInProviders: ReadonlyArray<BuiltInProvider> = ["claude", "codex", "opencode", "freecode", "gemini", "antigravity", "grok"];
 
 declare const customAgentBrand: unique symbol;
 /** A validated custom agent name; only `customAgentName` creates one. */
-type NamedDriverKind = "claude" | "codex" | "opencode" | "cursor" | "grok" | "antigravity" | "gemini";
+type NamedDriverKind = "claude" | "codex" | "opencode" | "cursor" | "grok" | "antigravity" | "gemini" | "freecode";
 type CustomAgent = Exclude<ProviderDriverKind, NamedDriverKind> & { readonly [customAgentBrand]: true };
 type Provider = BuiltInProvider | CustomAgent;
 
@@ -134,6 +134,7 @@ const providerLabels: Record<BuiltInProvider, { readonly agent: string; readonly
   claude: { agent: "Claude", thread: "Claude Code" },
   codex: { agent: "Codex", thread: "Codex" },
   opencode: { agent: "OpenCode", thread: "OpenCode" },
+  freecode: { agent: "freecode", thread: "freecode" },
   gemini: { agent: "Gemini", thread: "Gemini CLI" },
   antigravity: { agent: "Antigravity", thread: "Antigravity" },
   grok: { agent: "Grok", thread: "Grok Build" },
@@ -311,6 +312,9 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     if (request.method === "POST" && url.pathname === "/v1/providers/codex/permission") {
       return await receivePermission(response, await readJson<ClaudePermissionHookInput>(request), "codex", state);
     }
+    if (request.method === "POST" && url.pathname === "/v1/providers/freecode/permission") {
+      return await receivePermission(response, await readJson<ClaudePermissionHookInput>(request), "freecode", state);
+    }
     const inProcess = /^\/v1\/providers\/opencode\/(permission|question)(\/resolved)?$/.exec(url.pathname);
     if (request.method === "POST" && inProcess) {
       const provider: RequestIdProvider = "opencode";
@@ -330,14 +334,21 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     if (request.method === "POST" && url.pathname === "/v1/providers/codex/question") {
       return await receiveCodexQuestion(response, await readJson<ClaudeQuestionHookInput>(request), state);
     }
+    if (request.method === "POST" && url.pathname === "/v1/providers/freecode/question") {
+      // freecode-hook.ts already relabels its `question` tool to
+      // "AskUserQuestion" before posting, so no Codex-style server-side
+      // wrapper is needed here.
+      return await receiveQuestion(response, await readJson<ClaudeQuestionHookInput>(request), "freecode", state);
+    }
     const relayed = /^\/v1\/providers\/(antigravity|grok)\/question$/.exec(url.pathname);
     if (request.method === "POST" && relayed) {
       return await receiveRelayedQuestion(response, await readJson<ClaudeQuestionHookInput>(request), relayed[1] as RelayProvider, state);
     }
-    if (request.method === "POST" && url.pathname === "/v1/providers/claude/question/resolved") {
+    const resolvedQuestion = /^\/v1\/providers\/(claude|freecode)\/question\/resolved$/.exec(url.pathname);
+    if (request.method === "POST" && resolvedQuestion) {
       return resolveClaudeQuestion(response, await readJson<ClaudeQuestionHookInput>(request), state);
     }
-    const turn = /^\/v1\/providers\/(claude|codex|opencode|gemini|antigravity|grok)\/(stop|resume)$/.exec(url.pathname);
+    const turn = /^\/v1\/providers\/(claude|codex|opencode|gemini|antigravity|grok|freecode)\/(stop|resume)$/.exec(url.pathname);
     if (request.method === "POST" && turn) {
       const provider = turn[1] as Provider;
       const input = await readJson<ClaudeTurnHookInput>(request);
@@ -354,11 +365,11 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         default: return receiveResume(response, await readJson<ClaudeTurnHookInput>(request), name, state);
       }
     }
-    const failure = /^\/v1\/providers\/(claude|codex|opencode|gemini|antigravity|grok)\/failure$/.exec(url.pathname);
+    const failure = /^\/v1\/providers\/(claude|codex|opencode|gemini|antigravity|grok|freecode)\/failure$/.exec(url.pathname);
     if (request.method === "POST" && failure) {
       return receiveFailure(response, await readJson<FailureHookInput>(request), failure[1] as Provider, state);
     }
-    const activity = /^\/v1\/providers\/(claude|codex|opencode|gemini|antigravity|grok)\/activity$/.exec(url.pathname);
+    const activity = /^\/v1\/providers\/(claude|codex|opencode|gemini|antigravity|grok|freecode)\/activity$/.exec(url.pathname);
     if (request.method === "POST" && activity) {
       return receiveActivity(response, await readJson<ActivityHookInput>(request), activity[1] as Provider, state);
     }

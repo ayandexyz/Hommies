@@ -15,8 +15,8 @@ import { homedir } from "node:os";
 import { basename, delimiter, dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-export type SetupProvider = "claude" | "codex" | "opencode" | "gemini" | "antigravity" | "grok";
-export const SETUP_PROVIDERS: ReadonlyArray<SetupProvider> = ["claude", "codex", "opencode", "gemini", "antigravity", "grok"];
+export type SetupProvider = "claude" | "codex" | "opencode" | "gemini" | "antigravity" | "grok" | "freecode";
+export const SETUP_PROVIDERS: ReadonlyArray<SetupProvider> = ["claude", "codex", "opencode", "gemini", "antigravity", "grok", "freecode"];
 
 type JsonObject = { [key: string]: unknown };
 
@@ -85,6 +85,27 @@ const GROK_HOOKS: ReadonlyArray<HookSpec> = [
   { event: "StopFailure", timeout: 5 },
   { event: "StopCancelled", timeout: 5 },
   { event: "SessionEnd", timeout: 5 },
+];
+
+/**
+ * freecode's command hooks carry no event-name env var (unlike Claude/Codex's
+ * stdin JSON), so every entry passes its own event name as `args` — read back
+ * as `argv[2]` by freecode-hook.ts. `PreToolUse` has no timeout because the
+ * same catchall entry also carries the up-to-5-minute wait for the `question`
+ * tool; `PostToolUse` is scoped to `question` only (resolved-detection), same
+ * as Claude's `AskUserQuestion`-only entry. freecode has no `StopFailure` or
+ * `SessionEnd` hook, so those are not wired.
+ */
+const FREECODE_HOOKS: ReadonlyArray<HookSpec> = [
+  { event: "SessionStart", timeout: 5, args: ["SessionStart"] },
+  { event: "PreToolUse", matcher: "*", args: ["PreToolUse"] },
+  { event: "PostToolUse", matcher: "question", args: ["PostToolUse"] },
+  { event: "PostToolUseFailure", matcher: "*", timeout: 5, args: ["PostToolUseFailure"] },
+  { event: "PermissionRequest", timeout: 305, args: ["PermissionRequest"] },
+  { event: "Stop", timeout: 5, args: ["Stop"] },
+  { event: "UserPromptSubmit", timeout: 5, args: ["UserPromptSubmit"] },
+  { event: "SubagentStart", timeout: 5, args: ["SubagentStart"] },
+  { event: "SubagentStop", timeout: 5, args: ["SubagentStop"] },
 ];
 
 /** The key our entry lives under in Antigravity's `hooks.json`, which is keyed by hook name. */
@@ -255,6 +276,11 @@ export const mergeGrokHooks = (config: JsonObject, hookPath: string | null): Jso
   mergeCommandHooks(config, GROK_HOOKS, "grok-hook.js", hookPath === null ? null : hookCommand(hookPath),
     (args) => hookCommand(hookPath ?? "", ...args));
 
+/** Every FREECODE_HOOKS entry carries `args` (its event name); see the list's own comment. */
+export const mergeFreecodeHooks = (config: JsonObject, hookPath: string | null): JsonObject =>
+  mergeCommandHooks(config, FREECODE_HOOKS, "freecode-hook.js", hookPath === null ? null : hookCommand(hookPath),
+    (args) => hookCommand(hookPath ?? "", ...args));
+
 /**
  * Antigravity's `hooks.json` maps hook names to their events. We own the
  * `hommies` entry: it is replaced on install and removed on uninstall, and
@@ -387,6 +413,8 @@ function targets(environment: SetupEnvironment): ReadonlyArray<ProviderTarget> {
   const geminiDir = join(home, ".gemini");
   const antigravityDir = join(geminiDir, "config");
   const grokDir = join(home, ".grok");
+  // freecode has no config-dir override env var (unlike Claude/Codex).
+  const freecodeDir = join(home, ".freecode");
   return [
     {
       provider: "claude",
@@ -443,6 +471,17 @@ function targets(environment: SetupEnvironment): ReadonlyArray<ProviderTarget> {
       file: join(grokDir, "hooks", "hommies.json"),
       merge: (config, install) => mergeGrokHooks(config, install ? join(distDir, "grok-hook.js") : null),
       fingerprint: (config) => commandHookFingerprint(config, "grok-hook.js"),
+    },
+    {
+      // freecode's settings.json accepts the same nested hook shape Claude's
+      // does (see apps/core/src/hooks/settings.ts's normalizeEntry upstream),
+      // so this writes straight into the user's global settings alongside
+      // whatever other hooks or project config they already have there.
+      provider: "freecode",
+      configDir: freecodeDir,
+      file: join(freecodeDir, "settings.json"),
+      merge: (config, install) => mergeFreecodeHooks(config, install ? join(distDir, "freecode-hook.js") : null),
+      fingerprint: (config) => commandHookFingerprint(config, "freecode-hook.js"),
     },
   ];
 }

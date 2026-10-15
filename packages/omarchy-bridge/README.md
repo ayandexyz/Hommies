@@ -38,7 +38,7 @@ versioned path (`/v2/...`).
 
 Install the package, then let `hommies setup` (the alias from before the rename,
 `agent-fold setup`, also works) register the hooks for the agents it finds (Claude Code in `~/.claude`, Codex in `~/.codex`, OpenCode in
-`~/.config/opencode`, Gemini CLI in `~/.gemini`, Antigravity in `~/.gemini/config`,
+`~/.config/opencode`, freecode in `~/.freecode`, Gemini CLI in `~/.gemini`, Antigravity in `~/.gemini/config`,
 Grok Build in `~/.grok`):
 
 ```sh
@@ -47,7 +47,7 @@ hommies setup --dry-run   # preview
 hommies setup
 ```
 
-In a terminal, setup first lists Claude Code, Codex, OpenCode, Gemini CLI,
+In a terminal, setup first lists Claude Code, Codex, OpenCode, freecode, Gemini CLI,
 Antigravity, and Grok Build with whether
 each is installed, and lets you pick which to set up (arrows or `j`/`k` move,
 space toggles, enter confirms). `--yes` sets up every installed agent without
@@ -59,7 +59,7 @@ every file it changes is first backed up as `<file>.hommies-backup-<time>`.
 It respects `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, and `XDG_CONFIG_HOME`, writes
 through symlinked dotfiles, and leaves unparseable files and OpenCode's
 `opencode.jsonc` untouched (register those by hand as described below). Limit it
-with `--only claude,codex,opencode,gemini,antigravity,grok`.
+with `--only claude,codex,opencode,freecode,gemini,antigravity,grok`.
 
 To see whether each agent's hooks match what this version of setup writes:
 
@@ -297,7 +297,7 @@ edit is counted roughly instead, so a hook never slows the agent down.
 The field is optional, so older plugin copies ignore it. `stepEdits` is
 index-aligned with `steps` (`null` for steps that are not edits) and is absent
 when no listed step is an edit. Adapters post to
-`/v1/providers/{claude,codex,opencode}/activity`:
+`/v1/providers/{claude,codex,opencode,freecode}/activity`:
 
 ```json
 { "hook_event_name": "PreToolUse", "session_id": "...", "cwd": "/w/app", "tool_name": "Bash", "tool_input": { "command": "pnpm build" } }
@@ -345,6 +345,8 @@ prompt or the agent runs another tool.
   other 5xx a server error, `ProviderAuthError` (V2: a 401 or 403) a sign-in
   error, and `MessageOutputLengthError` the output token limit.
 - **Codex** has no failure hook, so its failed turns are not reported.
+- **freecode** has no failure hook either (and no `SessionEnd` hook), so its
+  failed and ended-elsewhere turns are not reported.
 
 Adapters post to `/v1/providers/{provider}/failure`:
 
@@ -375,9 +377,10 @@ Claude-style hook JSON on stdin and reports to `/v1/agents/<name>/...`:
 - The name comes from `--agent`, then `$HOMMIES_AGENT`, then an `agent`
   field in the payload. It must be 1-24 lowercase letters, digits, or hyphens,
   and not `claude`, `codex`, `opencode`, `cursor`, `grok`,
-  `antigravity`, or `gemini`, so a custom agent cannot pose as a built-in one.
-  (`gemini` became reserved when Gemini CLI got its own hook; a custom agent
-  named `gemini` should switch to `hommies setup --only gemini`.) Invalid
+  `antigravity`, `gemini`, or `freecode`, so a custom agent cannot pose as a
+  built-in one. (`gemini` became reserved when Gemini CLI got its own hook; a
+  custom agent named `gemini` should switch to `hommies setup --only
+  gemini`.) Invalid
   names are dropped by the hook and rejected by the bridge with `400`; such
   events never reach a built-in provider.
 - Supported: live activity (`SessionStart`, `PreToolUse`,
@@ -409,6 +412,8 @@ rule; the item then has `"canAcceptAlways": true`, and the panel sends
 - **OpenCode**: the plugin replies `always` instead of `once`.
 - **Codex** rejects `updatedPermissions` in its hook output, so it never gets
   the button.
+- **freecode** has no "remember this rule" hook mechanism either, so it
+  never gets the button.
 
 `acceptAlways` on an item without `canAcceptAlways` is treated as `accept`.
 
@@ -501,6 +506,50 @@ groups:
 Review and trust the hooks from Codex's `/hooks` screen before testing them.
 If the bridge is unavailable, the adapter exits without a decision and Codex
 keeps its native approval prompt; turn hooks never write to stdout.
+
+## freecode integration
+
+freecode gets the same features as Claude Code: permission requests from the
+bar, mirroring and answering its `question` tool (freecode's
+`AskUserQuestion` equivalent), plain-text question and finished-turn
+detection (`Stop`), clearing on reply (`UserPromptSubmit`), session titles
+and the last assistant message read straight from freecode's own session
+store (`~/.freecode/sessions/<formatted-cwd>/<id>/`, since freecode's hooks
+carry no transcript path), [live activity](#live-activity), and desktop
+notifications. freecode has no `StopFailure` or `SessionEnd` hook, so
+rate-limit/error attention and session-end activity are not reported for it.
+
+Unlike Claude and Codex, freecode's command hooks carry no stdin JSON and no
+event-name env var — just `CLAUDE_*`-prefixed env vars (its own hook
+contract, independently of what agent is talking to it) and the event name
+as `argv[2]`. `freecode-hook.js` handles that directly; nothing inside
+freecode itself needs to know agent-fold exists.
+
+`hommies setup` writes into `~/.freecode/settings.json`, which accepts the
+same nested hook shape Claude's `settings.json` does:
+
+```json
+{
+  "hooks": {
+    "SessionStart": [{ "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/hommies/dist/freecode-hook.js SessionStart", "timeout": 5 }] }],
+    "PreToolUse": [{ "matcher": "*", "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/hommies/dist/freecode-hook.js PreToolUse" }] }],
+    "PostToolUse": [{ "matcher": "question", "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/hommies/dist/freecode-hook.js PostToolUse" }] }],
+    "PostToolUseFailure": [{ "matcher": "*", "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/hommies/dist/freecode-hook.js PostToolUseFailure", "timeout": 5 }] }],
+    "PermissionRequest": [{ "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/hommies/dist/freecode-hook.js PermissionRequest", "timeout": 305 }] }],
+    "Stop": [{ "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/hommies/dist/freecode-hook.js Stop", "timeout": 5 }] }],
+    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/hommies/dist/freecode-hook.js UserPromptSubmit", "timeout": 5 }] }],
+    "SubagentStart": [{ "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/hommies/dist/freecode-hook.js SubagentStart", "timeout": 5 }] }],
+    "SubagentStop": [{ "hooks": [{ "type": "command", "command": "node /absolute/path/to/@thisisayande/hommies/dist/freecode-hook.js SubagentStop", "timeout": 5 }] }]
+  }
+}
+```
+
+freecode watches `settings.json` while its daemon runs, so these apply
+immediately — no restart needed. If the bridge is unavailable or a
+`PermissionRequest` times out, the adapter exits without printing a
+decision: freecode treats a matched `PermissionRequest` hook with no
+explicit decision as passthrough, never an implicit allow, so its own
+permission rules still decide.
 
 ## OpenCode integration
 

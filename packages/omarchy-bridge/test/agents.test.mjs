@@ -13,7 +13,7 @@ const dist = fileURLToPath(new URL("../dist/", import.meta.url));
 
 test("custom agent names are short, lowercase, and never a built-in name", () => {
   for (const name of ["aider", "my-tool", "a", "x".repeat(24), "gemini-2"]) assert.ok(isValidAgentName(name), name);
-  for (const name of ["", "Aider", "my_tool", "x".repeat(25), "claude", "codex", "opencode", "cursor", "a/b"]) {
+  for (const name of ["", "Aider", "my_tool", "x".repeat(25), "claude", "codex", "opencode", "cursor", "freecode", "a/b"]) {
     assert.ok(!isValidAgentName(name), name);
   }
 });

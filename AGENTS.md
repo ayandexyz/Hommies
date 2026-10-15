@@ -99,8 +99,9 @@ plugin's contract with installed copies; preserve it.
 - `POST /v1/preferences` — `BridgePreferencesInput`.
 - Provider hooks (POST): `/v1/providers/claude/{permission,question,question/resolved}`,
   `/v1/providers/codex/permission`,
+  `/v1/providers/freecode/{permission,question,question/resolved}`,
   `/v1/providers/opencode/{permission,question,permission/resolved,question/resolved}`,
-  `/v1/providers/{claude,codex,opencode}/{stop,resume}`.
+  `/v1/providers/{claude,codex,opencode,freecode}/{stop,resume}`.
 - `kind` values on `PendingItem`: `question | permission | attention | finished`.
   v2 will add `plan | session-error | signed-out` (see the `// TODO` in
   `src/types.ts`).
@@ -142,7 +143,7 @@ exercise the HTTP surface end-to-end:
 - `question-surfaces.test.mjs` — topbar vs cli answer surfaces.
 - `notifications.test.mjs` — desktop notification dispatch.
 - `stop-detection.test.mjs` — `detectReplyRequest` heuristic.
-- `codex.test.mjs`, `opencode.test.mjs` — provider
+- `codex.test.mjs`, `opencode.test.mjs`, `freecode-hook.test.mjs` — provider
   adapters (the OpenCode tests drive the plugin's helpers; they
   do not spawn OpenCode).
 
