@@ -200,6 +200,11 @@ PanelWindow {
       spacing: Style.space(10)
 
       MenuToggle {
+        label: "Hide Hommie"
+        checked: root.host.hideBuddy
+        onToggled: root.host.setHideBuddy(!checked)
+      }
+      MenuToggle {
         label: "Answer questions here"
         checked: root.host.questionAnswerSurface === "topbar"
         onToggled: root.host.setQuestionAnswerSurface(checked ? "cli" : "topbar")

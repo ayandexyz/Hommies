@@ -31,6 +31,8 @@ Item {
   readonly property bool sounds: prefs.sounds === true
   /** Draw the character above fullscreen windows (Overlay layer) instead of under them (Top layer). */
   readonly property bool overFullscreen: prefs.overFullscreen !== false
+  /** Hides the floating character entirely; the bar bell keeps working. */
+  readonly property bool hideBuddy: prefs.hideBuddy === true
   /** File name (without .qml) in characters/. */
   readonly property string character: typeof prefs.character === "string" && /^[A-Za-z0-9_-]+$/.test(prefs.character)
     ? prefs.character : "Hommie"
@@ -84,6 +86,7 @@ Item {
   function setDesktopNotifications(enabled) { savePrefs({ desktopNotifications: enabled === true }) }
   function setSounds(enabled) { savePrefs({ sounds: enabled === true }) }
   function setOverFullscreen(enabled) { savePrefs({ overFullscreen: enabled === true }) }
+  function setHideBuddy(enabled) { savePrefs({ hideBuddy: enabled === true }) }
 
   // --- outfit ----------------------------------------------------------------
 
@@ -393,6 +396,11 @@ Item {
       root.setDesktopNotifications(!root.desktopNotifications)
       return root.desktopNotifications ? "on" : "off"
     }
+    /** Shows or hides the floating character; bind a key to this to bring it back once hidden. */
+    function toggleHidden(): string {
+      root.setHideBuddy(!root.hideBuddy)
+      return root.hideBuddy ? "hidden" : "shown"
+    }
     /** Sets the outfit ("auto", "none", or a name) and returns what he wears now ("none" for nothing). */
     function outfit(name: string): string {
       if (name !== "auto" && name !== "none" && root.outfits.indexOf(name) < 0) return "unknown"
@@ -413,7 +421,7 @@ Item {
   }
 
   LazyLoader {
-    active: root.screen !== null && panelLoader.item !== null
+    active: !root.hideBuddy && root.screen !== null && panelLoader.item !== null
 
     FloatingBuddy {
       screen: root.screen

@@ -22,11 +22,14 @@ runs the daemon this plugin talks to.
 The service shows a floating character instead of relying on the bar bell. Its
 mood follows the most urgent item: approval, question, error, rate limit,
 working, thinking, finished, idle, and sleeping after 10 minutes of nothing.
-Right-click the character for its settings: answer questions here or in the
-agent CLI, desktop notifications, sounds, "Over fullscreen", and moving it to
-the next monitor. It shows above fullscreen windows by default; turn off "Over
-fullscreen" to keep it under them (for example, under a fullscreen video).
-Its preferences (answer surface, notifications, sounds, over fullscreen,
+Right-click the character for its settings: "Hide Hommie", answer questions
+here or in the agent CLI, desktop notifications, sounds, "Over fullscreen",
+and moving it to the next monitor. It shows above fullscreen windows by
+default; turn off "Over fullscreen" to keep it under them (for example, under
+a fullscreen video). Toggling "Hide Hommie" closes the character immediately
+(its own menu goes with it), so bind the `toggleHidden` IPC method (below) to
+a key if you want a way back in without editing `floating.json` by hand.
+Its preferences (answer surface, notifications, sounds, over fullscreen, hidden,
 position, monitor, and `character`) are saved in `$XDG_DATA_HOME/hommies/floating.json`. The bar
 bell still works. If you keep both, they share the same bridge preferences, so
 remove the bell from the bar to avoid toggling them from two places.
@@ -76,6 +79,7 @@ bindd = SUPER ALT, A, Hommies: answer next, exec, omarchy-shell hommies jumpToPe
 | `focusTerminal` | Focuses the terminal of the session waiting on you, else the newest busy one | `ok` or `none` |
 | `toggleSounds` | Turns sounds on or off | `on` or `off` |
 | `toggleNotifications` | Turns desktop notifications on or off | `on` or `off` |
+| `toggleHidden` | Shows or hides the floating character | `shown` or `hidden` |
 | `outfit <name>` | Dresses Hommie: `auto`, `none`, or an outfit below | what he wears now, or `none` |
 | `emote <name>` | Plays `greet`, `celebrate`, `dizzy`, `wink`, `yawn`, or `look` | `ok` |
 
