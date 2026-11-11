@@ -87,14 +87,47 @@ export async function processRunning(identity: ProcessIdentity, read: StatReader
   return fields !== null && fields.state !== "Z" && fields.startTime === identity.startTime;
 }
 
+export type CmdlineReader = (pid: number) => Promise<string[] | null>;
+
+const readCmdline: CmdlineReader = (pid) => readFile(`/proc/${pid}/cmdline`, "utf8").then(
+  (raw) => raw.split("\0").filter((arg) => arg.length > 0),
+  () => null,
+);
+
+/**
+ * The session id a Claude Code process forked from, from its
+ * `--fork-session --resume <id or transcript path>` arguments, or `null`.
+ * Claude's background daemon starts a session this way when it takes over a
+ * chat from a foreground `claude`, and the old id never sends `Stop` or
+ * `SessionEnd`.
+ */
+export function forkedSessionId(argv: ReadonlyArray<string>): string | null {
+  if (!argv.includes("--fork-session")) return null;
+  let resumed: string | undefined;
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index]!;
+    if (arg === "--resume" || arg === "-r") resumed = argv[index + 1];
+    else if (arg.startsWith("--resume=")) resumed = arg.slice("--resume=".length);
+  }
+  if (!resumed) return null;
+  const id = resumed.slice(resumed.lastIndexOf("/") + 1).replace(/\.jsonl$/, "");
+  return /^[A-Za-z0-9-]{1,128}$/.test(id) ? id : null;
+}
+
 /** Finds an agent's process and later checks it is still running. Tests pass a stub. */
 export interface AgentProcessProbe {
   readonly identify: (pids: ReadonlyArray<number>) => Promise<ProcessIdentity | null>;
   readonly running: (identity: ProcessIdentity) => Promise<boolean>;
+  /** The session id the agent process forked from, if it was started as a fork. */
+  readonly forkedFrom?: (identity: ProcessIdentity) => Promise<string | null>;
 }
 
 /** Reads `/proc`. Off Linux it finds no process, so no session is dropped. */
 export const procAgentProbe: AgentProcessProbe = {
   identify: (pids) => agentIdentity(pids),
   running: (identity) => processRunning(identity),
+  forkedFrom: async (identity) => {
+    const argv = await readCmdline(identity.pid);
+    return argv === null ? null : forkedSessionId(argv);
+  },
 };

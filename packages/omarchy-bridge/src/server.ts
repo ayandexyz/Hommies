@@ -593,9 +593,27 @@ function trackSession(state: BridgeState, provider: Provider, sessionId: string,
 
 /** Finds the session's agent process in the background; a later ancestry wins over this one. */
 function identifyAgent(state: BridgeState, sessionId: string, session: TrackedSession, pids: number[]): void {
-  void state.agentProcesses.identify(pids).then((agent) => {
-    if (state.sessions.get(sessionId) === session && session.pids === pids) session.agent = agent ?? undefined;
-  }, () => {});
+  void state.agentProcesses.identify(pids).then(async (agent) => {
+    if (state.sessions.get(sessionId) !== session || session.pids !== pids) return;
+    session.agent = agent ?? undefined;
+    if (agent) await dropHandedOffSession(state, sessionId, agent, pids);
+  }).catch(() => {});
+}
+
+/**
+ * Drops the session this one was forked from when its agent is an ancestor of
+ * this one: Claude's background daemon took the chat over from that agent, so
+ * the old id never sends `Stop` or `SessionEnd`, and its agent (now the
+ * daemon's client) keeps running. Requiring the ancestry keeps a fork started
+ * in another terminal from dropping a session that is still live.
+ */
+async function dropHandedOffSession(state: BridgeState, sessionId: string, agent: ProcessIdentity, pids: number[]): Promise<void> {
+  const forkedFrom = await state.agentProcesses.forkedFrom?.(agent);
+  if (!forkedFrom || forkedFrom === sessionId) return;
+  const old = state.sessions.get(forkedFrom);
+  if (!old?.agent || old.agent.pid === agent.pid || !pids.includes(old.agent.pid)) return;
+  dropSessionWithRequests(state, forkedFrom);
+  publish(state);
 }
 
 /**
@@ -610,22 +628,27 @@ async function dropExitedSessions(state: BridgeState): Promise<void> {
     if (!agent) continue;
     const running = await state.agentProcesses.running(agent).catch(() => true);
     if (running || state.sessions.get(sessionId) !== session || session.agent !== agent) continue;
-    dropSession(state, sessionId);
-    for (const [id, pending] of [...state.pending]) {
-      if (String(pending.item.threadId) !== sessionId) continue;
-      clearTimeout(pending.timer);
-      state.pending.delete(id);
-      pending.resolve({ behavior: "unchanged" });
-    }
-    for (const [id, question] of [...state.questions]) {
-      if (String(question.item.threadId) !== sessionId) continue;
-      clearTimeout(question.timer);
-      state.questions.delete(id);
-      question.resolve?.(null);
-    }
+    dropSessionWithRequests(state, sessionId);
     changed = true;
   }
   if (changed) publish(state);
+}
+
+/** Drops a session whose agent is gone, with the requests still pending for it. Callers publish. */
+function dropSessionWithRequests(state: BridgeState, sessionId: string): void {
+  dropSession(state, sessionId);
+  for (const [id, pending] of [...state.pending]) {
+    if (String(pending.item.threadId) !== sessionId) continue;
+    clearTimeout(pending.timer);
+    state.pending.delete(id);
+    pending.resolve({ behavior: "unchanged" });
+  }
+  for (const [id, question] of [...state.questions]) {
+    if (String(question.item.threadId) !== sessionId) continue;
+    clearTimeout(question.timer);
+    state.questions.delete(id);
+    question.resolve?.(null);
+  }
 }
 
 function dropSession(state: BridgeState, sessionId: string): void {

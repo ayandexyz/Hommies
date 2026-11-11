@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { agentIdentity, processRunning, statFields } from "../dist/process-tree.js";
+import { agentIdentity, forkedSessionId, processRunning, statFields } from "../dist/process-tree.js";
 import { startBridgeServer } from "../dist/server.js";
 
 // pid (comm) state ppid ... with starttime as field 22.
@@ -60,6 +60,48 @@ test("a session is dropped, with its open requests, once its agent process exits
   } finally {
     agent.kill();
   }
+});
+
+test("a forked Claude process names the session it was forked from", () => {
+  // The command line Claude's background daemon starts a taken-over chat with.
+  assert.equal(forkedSessionId([
+    "/usr/bin/claude", "--session-id", "0a52ae5c-d47f-47aa-b53a-edcd9ce3da47", "--fork-session",
+    "--resume", "/home/u/.claude/projects/-w/ccbeb49b-03f3-4514-9812-f5169b99a13f.jsonl", "--reply-on-resume",
+  ]), "ccbeb49b-03f3-4514-9812-f5169b99a13f");
+  assert.equal(forkedSessionId(["claude", "--fork-session", "--resume=abc-123"]), "abc-123");
+  assert.equal(forkedSessionId(["claude", "--resume", "abc-123"]), null, "a plain resume continues the same session");
+  assert.equal(forkedSessionId(["claude", "--session-id", "x", "--agent", "claude"]), null);
+});
+
+test("a session handed off to Claude's background daemon is dropped", { timeout: 10000 }, async () => {
+  // 100 is the foreground claude; the daemon (300) runs the fork (400) under it.
+  const forks = new Map([[400, "old"], [500, "live"]]);
+  const agentProcesses = {
+    identify: async (pids) => ({ pid: pids[0], startTime: "1" }),
+    running: async () => true,
+    forkedFrom: async (identity) => forks.get(identity.pid) ?? null,
+  };
+  await withServer(async ({ request }) => {
+    await request("POST", "/v1/providers/claude/resume", {
+      hook_event_name: "UserPromptSubmit", session_id: "old", pids: [100, 50],
+    });
+    await request("POST", "/v1/providers/claude/resume", {
+      hook_event_name: "UserPromptSubmit", session_id: "live", pids: [200, 50],
+    });
+    await waitFor(request, (snapshot) => snapshot.sessions.length === 2);
+
+    // A fork started in another terminal leaves the session it forked from alone.
+    await request("POST", "/v1/providers/claude/resume", {
+      hook_event_name: "UserPromptSubmit", session_id: "copy", pids: [500, 60],
+    });
+    await waitFor(request, (snapshot) => snapshot.sessions.length === 3);
+
+    await request("POST", "/v1/providers/claude/resume", {
+      hook_event_name: "UserPromptSubmit", session_id: "new", pids: [400, 300, 100, 50],
+    });
+    const snapshot = await waitFor(request, (next) => !next.sessions.some((session) => session.threadId === "old"));
+    assert.deepEqual(snapshot.sessions.map((session) => session.threadId).sort(), ["copy", "live", "new"]);
+  }, { agentProcesses });
 });
 
 async function waitFor(request, done, timeoutMs = 3000) {
