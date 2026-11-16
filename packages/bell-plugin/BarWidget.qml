@@ -53,14 +53,38 @@ BarWidget {
     return count
   }
 
+  // Service.qml polls the bridge too; once it is found, its snapshot is
+  // reused and this widget stops polling on its own.
+  property var service: null
+  function findService() {
+    var found = null
+    if (root.bar && root.bar.shell && typeof root.bar.shell.serviceFor === "function")
+      found = root.bar.shell.serviceFor(root.moduleName)
+    if (!found || found === root.service || found.snapshot === undefined) return
+    root.service = found
+    root.snapshot = Qt.binding(function() { return root.service.snapshot })
+    root.primed = true
+  }
+
+  // Panel.qml is large and builds its own window, so it is only created
+  // when first opened, and released a minute after it closes.
+  property bool panelWanted: false
+  property bool openWhenLoaded: false
+
   function open() {
     if (panelLoader.item) panelLoader.item.open()
+    else {
+      root.openWhenLoaded = true
+      root.panelWanted = true
+    }
   }
   function close() {
+    root.openWhenLoaded = false
     if (panelLoader.item) panelLoader.item.close()
   }
   function toggle() {
     if (panelLoader.item) panelLoader.item.toggle()
+    else root.open()
   }
   function closeForPopoutSwitch() {
     if (panelLoader.item) panelLoader.item.closeForPopoutSwitch()
@@ -73,6 +97,7 @@ BarWidget {
     panelLoader.item.settings = root.settings
   }
   function refreshSnapshot() {
+    if (root.service) return
     if (typeof Bridge !== "undefined") {
       Bridge.snapshot().then((s) => {
         var json = JSON.stringify(s)
@@ -171,21 +196,34 @@ BarWidget {
   Timer {
     id: pollTimer
     interval: 3000
-    running: true
+    running: root.service === null
     repeat: true
     triggeredOnStart: true
-    onTriggered: root.refreshSnapshot()
+    onTriggered: {
+      root.findService()
+      if (!root.service) root.refreshSnapshot()
+    }
   }
 
   Loader {
     id: panelLoader
-    active: true
+    active: root.panelWanted
     source: Qt.resolvedUrl("Panel.qml")
     visible: false
     onLoaded: {
       root.injectPanel()
-      Qt.callLater(root.injectPanel)
+      Qt.callLater(function() {
+        root.injectPanel()
+        if (root.openWhenLoaded && panelLoader.item) panelLoader.item.open()
+        root.openWhenLoaded = false
+      })
     }
+  }
+
+  Timer {
+    interval: 60 * 1000
+    running: root.panelWanted && !root.opened && !root.popoutSwitchClosing && !root.openWhenLoaded
+    onTriggered: root.panelWanted = false
   }
 
   WidgetButton {
